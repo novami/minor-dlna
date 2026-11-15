@@ -8,6 +8,8 @@ import (
 
 	"github.com/novami/minor-dlna/internal/dlna"
 	"github.com/novami/minor-dlna/internal/library"
+	"github.com/novami/minor-dlna/internal/media"
+	"github.com/novami/minor-dlna/internal/thumbs"
 )
 
 const didlHeader = `<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" ` +
@@ -21,36 +23,109 @@ func DIDL(objs []library.Object, baseURL string) string {
 	b.WriteString(didlHeader)
 	for _, o := range objs {
 		if o.IsDir {
-			b.WriteString(`<container id="` + esc(o.ID) + `" parentID="` + esc(o.ParentID) + `" restricted="1" searchable="0"`)
-			if o.ChildCount >= 0 {
-				b.WriteString(` childCount="` + strconv.Itoa(o.ChildCount) + `"`)
-			}
-			b.WriteString(`><dc:title>` + esc(o.Title) + `</dc:title>`)
-			b.WriteString(`<upnp:class>object.container.storageFolder</upnp:class></container>`)
-			continue
+			writeContainer(&b, o, baseURL)
+		} else {
+			writeItem(&b, o, baseURL)
 		}
-		b.WriteString(`<item id="` + esc(o.ID) + `" parentID="` + esc(o.ParentID) + `" restricted="1">`)
-		b.WriteString(`<dc:title>` + esc(o.Title) + `</dc:title>`)
-		b.WriteString(`<upnp:class>` + itemClass(o.Format.Kind) + `</upnp:class>`)
-		switch {
-		case o.Year > 0:
-			b.WriteString(`<dc:date>` + strconv.Itoa(o.Year) + `-01-01</dc:date>`)
-		case !o.ModTime.IsZero():
-			b.WriteString(`<dc:date>` + o.ModTime.UTC().Format("2006-01-02T15:04:05") + `</dc:date>`)
-		}
-		b.WriteString(`<res protocolInfo="` + esc(dlna.ProtocolInfo(o.Format)) + `" size="` + strconv.FormatInt(o.Size, 10) + `"`)
-		if o.DurationMs > 0 {
-			b.WriteString(` duration="` + formatDuration(o.DurationMs) + `"`)
-		}
-		if o.Width > 0 && o.Height > 0 {
-			b.WriteString(` resolution="` + strconv.Itoa(o.Width) + "x" + strconv.Itoa(o.Height) + `"`)
-		}
-		b.WriteString(`>`)
-		b.WriteString(esc(baseURL + o.MediaPath))
-		b.WriteString(`</res></item>`)
 	}
 	b.WriteString(`</DIDL-Lite>`)
 	return b.String()
+}
+
+func writeContainer(b *strings.Builder, o library.Object, baseURL string) {
+	b.WriteString(`<container id="` + esc(o.ID) + `" parentID="` + esc(o.ParentID) + `" restricted="1" searchable="0"`)
+	if o.ChildCount >= 0 {
+		b.WriteString(` childCount="` + strconv.Itoa(o.ChildCount) + `"`)
+	}
+	b.WriteString(`><dc:title>` + esc(o.Title) + `</dc:title>`)
+	class := o.Class
+	if class == "" {
+		class = "object.container.storageFolder"
+	}
+	b.WriteString(`<upnp:class>` + class + `</upnp:class>`)
+	if o.Artist != "" {
+		b.WriteString(`<upnp:artist>` + esc(o.Artist) + `</upnp:artist>`)
+	}
+	writeArt(b, o, baseURL)
+	b.WriteString(`</container>`)
+}
+
+func writeItem(b *strings.Builder, o library.Object, baseURL string) {
+	b.WriteString(`<item id="` + esc(o.ID) + `" parentID="` + esc(o.ParentID) + `" restricted="1">`)
+	b.WriteString(`<dc:title>` + esc(o.Title) + `</dc:title>`)
+	b.WriteString(`<upnp:class>` + itemClass(o.Format.Kind) + `</upnp:class>`)
+	switch {
+	case !o.Taken.IsZero() && o.Format.Kind == dlna.Image:
+		b.WriteString(`<dc:date>` + o.Taken.Format("2006-01-02T15:04:05") + `</dc:date>`)
+	case o.Year > 0:
+		b.WriteString(`<dc:date>` + strconv.Itoa(o.Year) + `-01-01</dc:date>`)
+	case !o.ModTime.IsZero():
+		b.WriteString(`<dc:date>` + o.ModTime.UTC().Format("2006-01-02T15:04:05") + `</dc:date>`)
+	}
+	if o.Format.Kind == dlna.Audio {
+		if o.Artist != "" {
+			b.WriteString(`<upnp:artist>` + esc(o.Artist) + `</upnp:artist><dc:creator>` + esc(o.Artist) + `</dc:creator>`)
+		}
+		if o.Album != "" {
+			b.WriteString(`<upnp:album>` + esc(o.Album) + `</upnp:album>`)
+		}
+		if o.Genre != "" {
+			b.WriteString(`<upnp:genre>` + esc(o.Genre) + `</upnp:genre>`)
+		}
+		if o.Track > 0 {
+			b.WriteString(`<upnp:originalTrackNumber>` + strconv.Itoa(o.Track) + `</upnp:originalTrackNumber>`)
+		}
+	}
+	writeArt(b, o, baseURL)
+
+	if o.Format.Kind == dlna.Image {
+		writePhotoRes(b, o, baseURL)
+	} else {
+		writeRes(b, dlna.ProtocolInfo(o.Format), o.Size, o.DurationMs, o.Width, o.Height, baseURL+o.MediaPath)
+	}
+	b.WriteString(`</item>`)
+}
+
+// writePhotoRes lists a TV-sized rendition first (LG picks the first resource), then the original and smaller sizes.
+func writePhotoRes(b *strings.Builder, o library.Object, baseURL string) {
+	id, _ := strconv.ParseInt(strings.TrimPrefix(o.ID, "I"), 10, 64)
+	heif := media.IsHEIF(o.Path)
+	if thumbs.ServesOriginal(o) {
+		writeRes(b, "http-get:*:image/jpeg:DLNA.ORG_PN=JPEG_LRG;DLNA.ORG_OP=01;DLNA.ORG_CI=0;DLNA.ORG_FLAGS=00D00000000000000000000000000000",
+			o.Size, 0, o.Width, o.Height, baseURL+o.MediaPath)
+	} else {
+		writeDerived(b, "lrg", id, baseURL)
+		if !heif {
+			writeRes(b, dlna.ProtocolInfo(o.Format), o.Size, 0, o.Width, o.Height, baseURL+o.MediaPath)
+		}
+	}
+	writeDerived(b, "sm", id, baseURL)
+	writeDerived(b, "tn", id, baseURL)
+}
+
+func writeDerived(b *strings.Builder, name string, id int64, baseURL string) {
+	size, _ := thumbs.Lookup(name)
+	writeRes(b, "http-get:*:image/jpeg:"+thumbs.ContentFeatures(size), 0, 0, 0, 0, baseURL+library.ThumbPath(id, name))
+}
+
+func writeRes(b *strings.Builder, protocolInfo string, size, durationMs int64, w, h int, url string) {
+	b.WriteString(`<res protocolInfo="` + esc(protocolInfo) + `"`)
+	if size > 0 {
+		b.WriteString(` size="` + strconv.FormatInt(size, 10) + `"`)
+	}
+	if durationMs > 0 {
+		b.WriteString(` duration="` + formatDuration(durationMs) + `"`)
+	}
+	if w > 0 && h > 0 {
+		b.WriteString(` resolution="` + strconv.Itoa(w) + "x" + strconv.Itoa(h) + `"`)
+	}
+	b.WriteString(`>` + esc(url) + `</res>`)
+}
+
+func writeArt(b *strings.Builder, o library.Object, baseURL string) {
+	if o.ArtPath != "" {
+		b.WriteString(`<upnp:albumArtURI dlna:profileID="JPEG_TN">` + esc(baseURL+o.ArtPath) + `</upnp:albumArtURI>`)
+	}
 }
 
 func itemClass(k dlna.Kind) string {

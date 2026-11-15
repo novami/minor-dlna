@@ -23,6 +23,7 @@ import (
 	"github.com/novami/minor-dlna/internal/ssdp"
 	"github.com/novami/minor-dlna/internal/store"
 	"github.com/novami/minor-dlna/internal/stream"
+	"github.com/novami/minor-dlna/internal/thumbs"
 	"github.com/novami/minor-dlna/internal/upnp"
 	"github.com/novami/minor-dlna/internal/version"
 )
@@ -70,15 +71,20 @@ func run(cfgPath string) error {
 	if err != nil {
 		return err
 	}
+	ffmpeg := thumbs.FindFFmpeg()
+	cat.VideoThumbs = ffmpeg != ""
+	th := thumbs.New(filepath.Join(filepath.Dir(cfgPath), "cache", "thumbs"), ffmpeg, cat)
 	dev := upnp.New(cfg.Name, cfg.UUID, version.Version, cat)
 	scanner := library.NewScanner(cat, media.NewProber(""))
 	scanner.OnChange = func(uint32) { dev.NotifyChange() }
+	scanner.OnRemove = th.Purge
 	go scanner.Run(ctx)
 	serverName := fmt.Sprintf("%s/1.0 UPnP/1.0 MinorDLNA/%s", runtime.GOOS, version.Version)
 
 	mux := http.NewServeMux()
 	dev.Register(mux)
 	mux.Handle(stream.Prefix, stream.Handler(cat))
+	mux.Handle("/thumb/", th)
 
 	srv := &http.Server{
 		Addr:              ":" + strconv.Itoa(cfg.Port),

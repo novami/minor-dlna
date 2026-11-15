@@ -38,6 +38,8 @@ var formats = map[string]Format{
 	".jpeg": {Image, "image/jpeg"},
 	".png":  {Image, "image/png"},
 	".gif":  {Image, "image/gif"},
+	".heic": {Image, "image/heic"},
+	".heif": {Image, "image/heif"},
 	".mp3":  {Audio, "audio/mpeg"},
 	".flac": {Audio, "audio/flac"},
 	".m4a":  {Audio, "audio/mp4"},
@@ -85,7 +87,8 @@ func SourceProtocolInfo() string {
 	seen := map[string]bool{}
 	var out []string
 	for _, f := range formats {
-		if !seen[f.Mime] {
+		// HEIC is only served converted to JPEG.
+		if !seen[f.Mime] && f.Mime != "image/heic" && f.Mime != "image/heif" {
 			seen[f.Mime] = true
 			out = append(out, "http-get:*:"+f.Mime+":*")
 		}

@@ -96,7 +96,7 @@ internal/version/            verze vložená při buildu (-ldflags)
 - `TimeSeekRange.dlna.org: npt=…` → ffmpeg `-ss`; fallback odhad času z bajtového offsetu.
 - Titulky: hlavička `CaptionInfo.sec`, `<sec:CaptionInfoEx>` v DIDL, `res` s `text/srt`.
 
-**Fotky** – odvozeniny `JPEG_TN` (160 px), `JPEG_SM` (640 px), `JPEG_LRG` (≤ 4096 px) s aplikovanou EXIF orientací; HEIC → JPEG na požádání; vše v cache.
+**Fotky** – odvozeniny `JPEG_TN` (160 px), `JPEG_SM` (640×480), `JPEG_LRG` (≤ 4096 px) s aplikovanou EXIF orientací, generované až při prvním požadavku a cachované v `cache/thumbs` (klíč obsahuje mtime+velikost souboru, smazané položky se z cache čistí). JPEG do 4096 px bez rotace se posílá jako originál. HEIC/HEIF převádí systémový `sips` (součást macOS, bez ffmpeg); datum pořízení a rozměry HEIC čte také `sips`. Náhledy videí generuje ffmpeg (snímek v 10 % délky), bez ffmpeg se nenabízejí. Pohledy: Podle data (rok → měsíc, EXIF datum, jinak mtime), Složky.
 
 ## 4. Přehrát na TV (control point)
 
@@ -146,9 +146,9 @@ Správa: jeden ffmpeg proces na stream, ukončení při odpojení (context cance
 - Podmínky TMDb: zobrazit logo a text o použití TMDb ve web UI (sekce O aplikaci).
 - Bez API klíče vše funguje s názvy ze souborů.
 
-**Hudba** – tagy přes `dhowden/tag` (ID3v2, FLAC, MP4, OGG), obal z tagu nebo `cover.jpg`/`folder.jpg`; formáty pro LG direct: MP3, AAC, FLAC, WAV; ALAC/Opus/APE → FLAC.
+**Hudba** – tagy přes `dhowden/tag` (ID3v2, FLAC, MP4, OGG), chybějící údaje ze struktury `Interpret/Album/01 Skladba.ext`; obal z tagu nebo `cover`/`folder`/`front.jpg`. Pohledy: Interpreti → Alba → Skladby, Alba, Žánry → Alba, Složky. Formáty pro LG direct: MP3, AAC, FLAC, WAV; ALAC/Opus/APE → FLAC (fáze 4).
 
-**Index (SQLite):** od fáze 2 `library`, `dir` (jen složky s médii), `show`, `item` (soubor + parsované údaje + technické údaje z ffprobe v jedné tabulce), `meta` (SystemUpdateID). Další fáze přidají migracemi `photo_meta`, `artist`/`album`/`track`, `tmdb_cache`, `image`, `play_state`, `client`, `renderer`. Rescan zapisuje jen změněné soubory (size+mtime). ID objektů (`I<id>`, `D<id>`, `S<id>`) jsou stabilní napříč restarty.
+**Index (SQLite):** od fáze 2 `library`, `dir` (jen složky s médii), `show`, `item` (soubor + parsované údaje + technické údaje z ffprobe v jedné tabulce), `meta` (SystemUpdateID). Fáze 3 přidala sloupce fotek/hudby do `item` a tabulky `artist`, `album`, `genre`. Další fáze přidají `tmdb_cache`, `image`, `play_state`, `client`, `renderer`. Rescan zapisuje jen změněné soubory (size+mtime). ID objektů (`I<id>`, `D<id>`, `S<id>`) jsou stabilní napříč restarty.
 
 **Detekce změn (místo fsnotify):** fsnotify na macOS používá kqueue s jedním deskriptorem na soubor, což u velkých knihoven narazí na limity. Proto každou minutu `stat` všech známých složek – změněné mtime složky (přidání/smazání/přejmenování) spustí rescan knihovny; soubory mladší 2 min se považují za kopírované a knihovna se zkontroluje znovu. Plný rescan každých 6 h zachytí úpravy souborů na místě. Funguje stejně i na síťových svazcích, bez závislosti.
 

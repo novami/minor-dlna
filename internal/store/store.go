@@ -73,6 +73,47 @@ var migrations = []string{
 	CREATE INDEX item_year ON item (library_id, year);
 	CREATE INDEX item_show ON item (show_id, season, episode);
 	CREATE INDEX item_probe ON item (probed);`,
+
+	// Photos and music.
+	`ALTER TABLE item ADD COLUMN taken_at INTEGER;
+	ALTER TABLE item ADD COLUMN orientation INTEGER;
+	ALTER TABLE item ADD COLUMN artist TEXT;
+	ALTER TABLE item ADD COLUMN artist_id INTEGER REFERENCES artist ON DELETE SET NULL;
+	ALTER TABLE item ADD COLUMN album_id INTEGER REFERENCES album ON DELETE SET NULL;
+	ALTER TABLE item ADD COLUMN genre_id INTEGER REFERENCES genre ON DELETE SET NULL;
+	ALTER TABLE item ADD COLUMN disc INTEGER;
+	ALTER TABLE item ADD COLUMN track INTEGER;
+	ALTER TABLE item ADD COLUMN has_art INTEGER NOT NULL DEFAULT 0;
+	CREATE TABLE artist (
+		id         INTEGER PRIMARY KEY,
+		library_id INTEGER NOT NULL REFERENCES library ON DELETE CASCADE,
+		name       TEXT NOT NULL,
+		sort_name  TEXT NOT NULL,
+		UNIQUE (library_id, name)
+	);
+	CREATE TABLE album (
+		id         INTEGER PRIMARY KEY,
+		library_id INTEGER NOT NULL REFERENCES library ON DELETE CASCADE,
+		artist_id  INTEGER REFERENCES artist ON DELETE CASCADE,
+		title      TEXT NOT NULL,
+		sort_title TEXT NOT NULL,
+		year       INTEGER,
+		UNIQUE (library_id, artist_id, title)
+	);
+	CREATE TABLE genre (
+		id         INTEGER PRIMARY KEY,
+		library_id INTEGER NOT NULL REFERENCES library ON DELETE CASCADE,
+		name       TEXT NOT NULL,
+		sort_name  TEXT NOT NULL,
+		UNIQUE (library_id, name)
+	);
+	CREATE INDEX item_taken ON item (library_id, taken_at);
+	CREATE INDEX item_album ON item (album_id, disc, track);
+	CREATE INDEX item_artist ON item (artist_id);
+	CREATE INDEX item_genre ON item (genre_id);
+	CREATE INDEX album_artist ON album (artist_id, sort_title);
+	-- Photos and music indexed before this migration lack metadata: force a re-read on next scan.
+	UPDATE item SET mtime = 0 WHERE kind IN (2, 3);`,
 }
 
 // Open opens (and migrates) the database at path.

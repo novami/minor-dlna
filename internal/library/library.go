@@ -33,20 +33,28 @@ const (
 var ErrNotFound = errors.New("no such object")
 
 type Object struct {
-	ID         string
-	ParentID   string
-	Title      string
-	IsDir      bool
-	ChildCount int // -1 = unknown
-	Path       string
-	Size       int64
-	ModTime    time.Time
-	Year       int
-	Format     dlna.Format
-	MediaPath  string // URL path of the media resource, items only
-	DurationMs int64
-	Width      int
-	Height     int
+	ID          string
+	ParentID    string
+	Title       string
+	IsDir       bool
+	ChildCount  int // -1 = unknown
+	Path        string
+	Size        int64
+	ModTime     time.Time
+	Year        int
+	Format      dlna.Format
+	MediaPath   string // URL path of the media resource, items only
+	DurationMs  int64
+	Width       int
+	Height      int
+	Orientation int
+	Taken       time.Time
+	Artist      string
+	Album       string
+	Genre       string
+	Track       int
+	ArtPath     string // URL path of a JPEG thumbnail, empty if none
+	Class       string // container class override, default storageFolder
 }
 
 type Library struct {
@@ -60,6 +68,8 @@ type Catalog struct {
 	st   *store.Store
 	libs []*Library
 	byID map[int64]*Library
+	// VideoThumbs enables thumbnails for video items (needs ffmpeg).
+	VideoThumbs bool
 }
 
 // NewCatalog syncs configured libraries into the store.
@@ -96,9 +106,12 @@ func views(t config.LibraryType) []view {
 		return []view{{"shows", "Seriály"}, {"recent", "Naposledy přidané"}, {"folders", "Složky"}}
 	case config.Videos:
 		return []view{{"folders", "Složky"}, {"recent", "Naposledy přidané"}}
-	default:
-		return nil // photos, music: folders directly
+	case config.Photos:
+		return []view{{"dates", "Podle data"}, {"folders", "Složky"}}
+	case config.Music:
+		return []view{{"artists", "Interpreti"}, {"albums", "Alba"}, {"genres", "Žánry"}, {"folders", "Složky"}}
 	}
+	return nil
 }
 
 func container(id, parent, title string, count int) Object {
@@ -130,7 +143,12 @@ func (c *Catalog) Metadata(ctx context.Context, id string) (Object, error) {
 				title = vw.title
 			}
 		}
-		if strings.HasPrefix(v, "y") {
+		switch {
+		case strings.HasPrefix(v, "py"):
+			parent, title = libID(lib)+"/dates", v[2:]
+		case strings.HasPrefix(v, "pm"):
+			parent, title = libID(lib)+"/py"+v[2:6], monthTitle(v[2:])
+		case strings.HasPrefix(v, "y"):
 			parent, title = libID(lib)+"/years", v[1:]
 		}
 		return container(id, parent, title, total), nil
@@ -154,6 +172,8 @@ func (c *Catalog) Metadata(ctx context.Context, id string) (Object, error) {
 			return container(id, "S"+strconv.FormatInt(showID, 10), seasonTitle(season), total), nil
 		}
 		return container(id, "L"+strconv.FormatInt(lid, 10)+"/shows", name, total), nil
+	case 'A', 'B', 'G':
+		return c.musicMetadata(ctx, id, total)
 	case 'I':
 		n, err := strconv.ParseInt(id[1:], 10, 64)
 		if err != nil {
@@ -204,6 +224,8 @@ func (c *Catalog) Children(ctx context.Context, id string, start, count int) ([]
 			return c.itemPage(ctx, id, ctxSeason, `i.show_id = ? AND i.season = ?`, "i.episode, i.sort_title", start, count, showID, season)
 		}
 		return c.seasons(ctx, id, showID, start, count)
+	case 'A', 'B', 'G':
+		return c.musicChildren(ctx, id, start, count)
 	case 'I':
 		return nil, 0, errIsItem
 	}
@@ -248,6 +270,10 @@ func (c *Catalog) libChildren(ctx context.Context, lib *Library, id, v string, s
 			return nil, 0, ErrNotFound
 		}
 		return c.itemPage(ctx, id, ctxMovie, `i.library_id = ? AND i.year = ?`, "i.sort_title", start, count, lid, year)
+	case v == "dates", strings.HasPrefix(v, "py"), strings.HasPrefix(v, "pm"):
+		return c.photoDates(ctx, lib, id, v, start, count)
+	case v == "artists", v == "albums", v == "genres":
+		return c.musicLists(ctx, lib, id, v, start, count)
 	case v == "shows":
 		return c.groupsNamed(ctx, id, `SELECT s.id, s.name, COUNT(i.id) FROM show s JOIN item i ON i.show_id = s.id
 			WHERE s.library_id = ? GROUP BY s.id ORDER BY s.sort_name`, "S", start, count, lid)
@@ -393,8 +419,10 @@ func (c *Catalog) itemPage(ctx context.Context, parent string, tc titleCtx, wher
 
 func (c *Catalog) items(ctx context.Context, parent string, tc titleCtx, where, order string, start, limit int, args ...any) ([]Object, error) {
 	q := `SELECT i.id, i.library_id, i.dir_id, i.path, i.name, i.mime, i.kind, i.size, i.mtime, i.title, i.year,
-		i.season, i.episode, i.episode_title, i.duration_ms, i.width, i.height, s.name
-		FROM item i LEFT JOIN show s ON s.id = i.show_id WHERE ` + where + ` ORDER BY ` + order + ` LIMIT ? OFFSET ?`
+		i.season, i.episode, i.episode_title, i.duration_ms, i.width, i.height, s.name,
+		i.orientation, i.taken_at, i.artist, al.title, g.name, i.track, i.has_art
+		FROM item i LEFT JOIN show s ON s.id = i.show_id LEFT JOIN album al ON al.id = i.album_id
+		LEFT JOIN genre g ON g.id = i.genre_id WHERE ` + where + ` ORDER BY ` + order + ` LIMIT ? OFFSET ?`
 	rows, err := c.st.DB.QueryContext(ctx, q, append(args, limit, start)...)
 	if err != nil {
 		return nil, err
@@ -410,10 +438,22 @@ func (c *Catalog) items(ctx context.Context, parent string, tc titleCtx, where, 
 			year, season, episode   sql.NullInt64
 			dur, w, h               sql.NullInt64
 			epTitle, show           sql.NullString
+			orient, taken, track    sql.NullInt64
+			artist, album, genre    sql.NullString
+			hasArt                  bool
 		)
 		if err := rows.Scan(&id, &libID, &dirID, &o.Path, &name, &mime, &kind, &o.Size, &mtime, &o.Title, &year,
-			&season, &episode, &epTitle, &dur, &w, &h, &show); err != nil {
+			&season, &episode, &epTitle, &dur, &w, &h, &show,
+			&orient, &taken, &artist, &album, &genre, &track, &hasArt); err != nil {
 			return nil, err
+		}
+		o.Orientation, o.Track = int(orient.Int64), int(track.Int64)
+		o.Artist, o.Album, o.Genre = artist.String, album.String, genre.String
+		if taken.Valid {
+			o.Taken = time.Unix(taken.Int64, 0)
+		}
+		if hasArt || (dlna.Kind(kind) == dlna.Video && c.VideoThumbs) {
+			o.ArtPath = ThumbPath(id, "tn")
 		}
 		o.ID = "I" + strconv.FormatInt(id, 10)
 		o.ParentID = parent
@@ -536,3 +576,8 @@ func page(objs []Object, start, count int) []Object {
 
 // NaturalCompare orders strings case-insensitively with numbers compared by value.
 func NaturalCompare(a, b string) int { return strings.Compare(SortKey(a), SortKey(b)) }
+
+// ThumbPath is the URL path of a generated JPEG for an item: size tn, sm or lrg.
+func ThumbPath(itemID int64, size string) string {
+	return "/thumb/" + strconv.FormatInt(itemID, 10) + "/" + size + ".jpg"
+}

@@ -31,6 +31,7 @@ type Scanner struct {
 	cat      *Catalog
 	prober   *media.Prober
 	OnChange func(updateID uint32)
+	OnRemove func(itemIDs []int64) // e.g. purge cached thumbnails
 
 	mu      sync.Mutex
 	dirs    map[int64]map[string]time.Time // library → folder → mtime at last scan
@@ -130,18 +131,28 @@ type scanStats struct{ added, updated, removed int }
 func (s scanStats) changed() bool { return s.added+s.updated+s.removed > 0 }
 
 type found struct {
-	root    int
-	rel     string
-	path    string
-	format  dlna.Format
-	size    int64
-	mtime   int64
-	relDir  string
-	dirName string
+	root   int
+	rel    string
+	path   string
+	format dlna.Format
+	size   int64
+	mtime  int64
+	relDir string
+	meta   described
+}
+
+type existing struct {
+	id          int64
+	size, mtime int64
+	seen        bool
 }
 
 // ScanLibrary walks the library folders and reconciles the index.
 func (s *Scanner) ScanLibrary(ctx context.Context, lib *Library) (scanStats, error) {
+	known, err := s.existingItems(ctx, lib.ID)
+	if err != nil {
+		return scanStats{}, err
+	}
 	want := kindFor(lib.Type)
 	dirMtimes := map[string]time.Time{}
 	var files []found
@@ -185,7 +196,12 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib *Library) (scanStats, err
 			if relDir == "." {
 				relDir = ""
 			}
-			files = append(files, found{root: root, rel: rel, path: p, format: f, size: info.Size(), mtime: info.ModTime().Unix(), relDir: relDir})
+			fd := found{root: root, rel: rel, path: p, format: f, size: info.Size(), mtime: info.ModTime().Unix(), relDir: relDir}
+			// Read file metadata only for new or changed files, outside the write transaction.
+			if e, ok := known[p]; !ok || e.size != fd.size || e.mtime != fd.mtime {
+				fd.meta = describe(ctx, lib.Type, p, rel, info.ModTime())
+			}
+			files = append(files, fd)
 			return nil
 		})
 		if err != nil {
@@ -193,9 +209,12 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib *Library) (scanStats, err
 		}
 	}
 
-	st, err := s.reconcile(ctx, lib, files)
+	st, removed, err := s.reconcile(ctx, lib, files)
 	if err != nil {
 		return st, err
+	}
+	if len(removed) > 0 && s.OnRemove != nil {
+		s.OnRemove(removed)
 	}
 	s.mu.Lock()
 	s.dirs[lib.ID] = dirMtimes
@@ -204,30 +223,43 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib *Library) (scanStats, err
 	return st, nil
 }
 
-func (s *Scanner) reconcile(ctx context.Context, lib *Library, files []found) (scanStats, error) {
+func (s *Scanner) existingItems(ctx context.Context, libID int64) (map[string]*existing, error) {
+	rows, err := s.cat.st.DB.QueryContext(ctx, `SELECT id, path, size, mtime FROM item WHERE library_id = ?`, libID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := map[string]*existing{}
+	for rows.Next() {
+		var e existing
+		var p string
+		if err := rows.Scan(&e.id, &p, &e.size, &e.mtime); err != nil {
+			return nil, err
+		}
+		items[p] = &e
+	}
+	return items, rows.Err()
+}
+
+func (s *Scanner) reconcile(ctx context.Context, lib *Library, files []found) (scanStats, []int64, error) {
 	var st scanStats
 	tx, err := s.cat.st.DB.BeginTx(ctx, nil)
 	if err != nil {
-		return st, err
+		return st, nil, err
 	}
 	defer tx.Rollback()
 
-	type existing struct {
-		id          int64
-		size, mtime int64
-		seen        bool
-	}
 	items := map[string]*existing{}
 	rows, err := tx.QueryContext(ctx, `SELECT id, path, size, mtime FROM item WHERE library_id = ?`, lib.ID)
 	if err != nil {
-		return st, err
+		return st, nil, err
 	}
 	for rows.Next() {
 		var e existing
 		var p string
 		if err := rows.Scan(&e.id, &p, &e.size, &e.mtime); err != nil {
 			rows.Close()
-			return st, err
+			return st, nil, err
 		}
 		items[p] = &e
 	}
@@ -242,7 +274,7 @@ func (s *Scanner) reconcile(ctx context.Context, lib *Library, files []found) (s
 	usedDirs := map[int64]bool{}
 	rows, err = tx.QueryContext(ctx, `SELECT id, root, rel FROM dir WHERE library_id = ?`, lib.ID)
 	if err != nil {
-		return st, err
+		return st, nil, err
 	}
 	for rows.Next() {
 		var id int64
@@ -250,7 +282,7 @@ func (s *Scanner) reconcile(ctx context.Context, lib *Library, files []found) (s
 		var rel string
 		if err := rows.Scan(&id, &root, &rel); err != nil {
 			rows.Close()
-			return st, err
+			return st, nil, err
 		}
 		dirs[dirKey{root, rel}] = id
 	}
@@ -288,79 +320,139 @@ func (s *Scanner) reconcile(ctx context.Context, lib *Library, files []found) (s
 		return id, nil
 	}
 
-	shows := map[string]int64{}
-	ensureShow := func(name string) (int64, error) {
-		if id, ok := shows[name]; ok {
-			return id, nil
-		}
-		var id int64
-		err := tx.QueryRowContext(ctx, `INSERT INTO show (library_id, name, sort_name) VALUES (?, ?, ?)
-			ON CONFLICT (library_id, name) DO UPDATE SET sort_name = excluded.sort_name RETURNING id`, lib.ID, name, SortKey(name)).Scan(&id)
-		shows[name] = id
-		return id, err
-	}
-
+	ents := newEntities(ctx, tx, lib.ID)
 	now := time.Now().Unix()
 	for _, f := range files {
 		dirID, err := ensureDir(f.root, f.relDir)
 		if err != nil {
-			return st, err
+			return st, nil, err
 		}
-		if e, ok := items[f.path]; ok {
+		e, ok := items[f.path]
+		if ok {
 			e.seen = true
 			if e.size == f.size && e.mtime == f.mtime {
 				continue
 			}
-			if _, err := tx.ExecContext(ctx, `UPDATE item SET size = ?, mtime = ?, dir_id = ?, probed = 0 WHERE id = ?`, f.size, f.mtime, dirID, e.id); err != nil {
-				return st, err
-			}
-			st.updated++
-			continue
 		}
-		m := describe(lib.Type, f.rel)
-		var showID sql.NullInt64
-		if m.show != "" {
-			id, err := ensureShow(m.show)
-			if err != nil {
-				return st, err
-			}
-			showID = sql.NullInt64{Int64: id, Valid: true}
-		}
-		// On the very first import use file time, so "recently added" reflects real history.
-		added := now
-		if firstScan {
-			added = f.mtime
-		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO item (library_id, dir_id, path, name, kind, mime, size, mtime, added_at,
-			title, sort_title, year, show_id, season, episode, episode_title)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			lib.ID, dirID, f.path, filepath.Base(f.path), int(f.format.Kind), f.format.Mime, f.size, f.mtime, added,
-			m.title, SortKey(m.sortTitle), nullInt(m.year), showID, nullIntIf(m.show != "", m.season), nullIntIf(m.show != "", m.episode), nullStr(m.epTitle))
+		ref, err := ents.resolve(f.meta)
 		if err != nil {
-			return st, err
+			return st, nil, err
 		}
-		st.added++
+		m := f.meta
+		cols := []any{dirID, f.size, f.mtime, m.title, SortKey(m.sortTitle), nullInt(m.year), ref.show,
+			nullIntIf(m.show != "", m.season), nullIntIf(m.show != "", m.episode), nullStr(m.epTitle),
+			nullTime(m.taken), nullInt(m.width), nullInt(m.height), nullInt(m.orientation),
+			nullStr(m.artist), ref.artist, ref.album, ref.genre, nullInt(m.disc), nullInt(m.track), m.hasArt}
+		if ok {
+			_, err = tx.ExecContext(ctx, `UPDATE item SET dir_id = ?, size = ?, mtime = ?, title = ?, sort_title = ?, year = ?,
+				show_id = ?, season = ?, episode = ?, episode_title = ?, taken_at = ?, width = ?, height = ?, orientation = ?,
+				artist = ?, artist_id = ?, album_id = ?, genre_id = ?, disc = ?, track = ?, has_art = ?, probed = 0 WHERE id = ?`,
+				append(cols, e.id)...)
+			st.updated++
+		} else {
+			// On the very first import use file time, so "recently added" reflects real history.
+			added := now
+			if firstScan {
+				added = f.mtime
+			}
+			_, err = tx.ExecContext(ctx, `INSERT INTO item (dir_id, size, mtime, title, sort_title, year,
+				show_id, season, episode, episode_title, taken_at, width, height, orientation,
+				artist, artist_id, album_id, genre_id, disc, track, has_art, library_id, path, name, kind, mime, added_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				append(cols, lib.ID, f.path, filepath.Base(f.path), int(f.format.Kind), f.format.Mime, added)...)
+			st.added++
+		}
+		if err != nil {
+			return st, nil, err
+		}
 	}
 
+	var removed []int64
 	for _, e := range items {
 		if !e.seen {
 			if _, err := tx.ExecContext(ctx, `DELETE FROM item WHERE id = ?`, e.id); err != nil {
-				return st, err
+				return st, nil, err
 			}
+			removed = append(removed, e.id)
 			st.removed++
 		}
 	}
 	for _, id := range dirs {
 		if !usedDirs[id] {
 			if _, err := tx.ExecContext(ctx, `DELETE FROM dir WHERE id = ?`, id); err != nil {
-				return st, err
+				return st, nil, err
 			}
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM show WHERE library_id = ? AND id NOT IN (SELECT show_id FROM item WHERE show_id IS NOT NULL)`, lib.ID); err != nil {
-		return st, err
+	for _, q := range []string{
+		`DELETE FROM show WHERE library_id = ? AND id NOT IN (SELECT show_id FROM item WHERE show_id IS NOT NULL)`,
+		`DELETE FROM album WHERE library_id = ? AND id NOT IN (SELECT album_id FROM item WHERE album_id IS NOT NULL)`,
+		`DELETE FROM artist WHERE library_id = ? AND id NOT IN (SELECT artist_id FROM item WHERE artist_id IS NOT NULL)`,
+		`DELETE FROM genre WHERE library_id = ? AND id NOT IN (SELECT genre_id FROM item WHERE genre_id IS NOT NULL)`,
+	} {
+		if _, err := tx.ExecContext(ctx, q, lib.ID); err != nil {
+			return st, nil, err
+		}
 	}
-	return st, tx.Commit()
+	return st, removed, tx.Commit()
+}
+
+// entities creates shows, artists, albums and genres on demand within a scan transaction.
+type entities struct {
+	ctx   context.Context
+	tx    *sql.Tx
+	libID int64
+	cache map[string]int64
+}
+
+type entityRefs struct{ show, artist, album, genre sql.NullInt64 }
+
+func newEntities(ctx context.Context, tx *sql.Tx, libID int64) *entities {
+	return &entities{ctx: ctx, tx: tx, libID: libID, cache: map[string]int64{}}
+}
+
+func (e *entities) get(key, q string, args ...any) (sql.NullInt64, error) {
+	if id, ok := e.cache[key]; ok {
+		return sql.NullInt64{Int64: id, Valid: true}, nil
+	}
+	var id int64
+	if err := e.tx.QueryRowContext(e.ctx, q, args...).Scan(&id); err != nil {
+		return sql.NullInt64{}, err
+	}
+	e.cache[key] = id
+	return sql.NullInt64{Int64: id, Valid: true}, nil
+}
+
+func (e *entities) resolve(m described) (entityRefs, error) {
+	var r entityRefs
+	var err error
+	if m.show != "" {
+		if r.show, err = e.get("s\x00"+m.show, `INSERT INTO show (library_id, name, sort_name) VALUES (?, ?, ?)
+			ON CONFLICT (library_id, name) DO UPDATE SET sort_name = excluded.sort_name RETURNING id`, e.libID, m.show, SortKey(m.show)); err != nil {
+			return r, err
+		}
+	}
+	if m.albumArtist != "" {
+		if r.artist, err = e.get("a\x00"+m.albumArtist, `INSERT INTO artist (library_id, name, sort_name) VALUES (?, ?, ?)
+			ON CONFLICT (library_id, name) DO UPDATE SET sort_name = excluded.sort_name RETURNING id`, e.libID, m.albumArtist, SortKey(m.albumArtist)); err != nil {
+			return r, err
+		}
+	}
+	if m.album != "" {
+		key := "b\x00" + strconv.FormatInt(r.artist.Int64, 10) + "\x00" + m.album
+		if r.album, err = e.get(key, `INSERT INTO album (library_id, artist_id, title, sort_title, year) VALUES (?, ?, ?, ?, ?)
+			ON CONFLICT (library_id, artist_id, title) DO UPDATE SET year = COALESCE(excluded.year, album.year) RETURNING id`,
+			e.libID, r.artist, m.album, SortKey(m.album), nullInt(m.year)); err != nil {
+			return r, err
+		}
+	}
+	if m.genre != "" {
+		if r.genre, err = e.get("g\x00"+m.genre, `INSERT INTO genre (library_id, name, sort_name) VALUES (?, ?, ?)
+			ON CONFLICT (library_id, name) DO UPDATE SET sort_name = excluded.sort_name RETURNING id`, e.libID, m.genre, SortKey(m.genre)); err != nil {
+			return r, err
+		}
+	}
+	return r, nil
 }
 
 type described struct {
@@ -369,9 +461,16 @@ type described struct {
 	show             string
 	season, episode  int
 	epTitle          string
+	// photos
+	taken                      time.Time
+	width, height, orientation int
+	// music
+	artist, albumArtist, album, genre string
+	disc, track                       int
+	hasArt                            bool
 }
 
-func describe(lt config.LibraryType, rel string) described {
+func describe(ctx context.Context, lt config.LibraryType, path, rel string, mtime time.Time) described {
 	name := filepath.Base(rel)
 	switch lt {
 	case config.Movies:
@@ -383,6 +482,29 @@ func describe(lt config.LibraryType, rel string) described {
 				title: ep.Show, sortTitle: ep.Show + " " + itoa(ep.Season) + " " + itoa(ep.Episode),
 				show: ep.Show, season: ep.Season, episode: ep.Episode, epTitle: ep.Title,
 			}
+		}
+	case config.Photos:
+		t := stripExt(name)
+		d := described{title: t, sortTitle: t, taken: mtime, hasArt: true}
+		if pm, err := media.ReadPhoto(ctx, path); err == nil {
+			d.width, d.height, d.orientation = pm.Width, pm.Height, pm.Orientation
+			if !pm.Taken.IsZero() {
+				d.taken = pm.Taken
+			}
+		} else {
+			slog.Debug("photo metadata", "path", path, "err", err)
+		}
+		return d
+	case config.Music:
+		am := media.ReadAudio(path, rel)
+		if am.Album != "" && am.AlbumArtist == "" {
+			// Album rows are unique per artist; NULL would never conflict and duplicate albums.
+			am.AlbumArtist = "Neznámý interpret"
+		}
+		return described{
+			title: am.Title, sortTitle: am.Title, year: am.Year,
+			artist: am.Artist, albumArtist: am.AlbumArtist, album: am.Album, genre: am.Genre,
+			disc: am.Disc, track: am.Track, hasArt: am.HasPicture,
 		}
 	}
 	t := stripExt(name)
@@ -434,7 +556,7 @@ func (s *Scanner) probePending(ctx context.Context) bool {
 					slog.Debug("probe failed", "path", j.path, "err", err)
 				}
 				_, err = s.cat.st.DB.ExecContext(ctx, `UPDATE item SET probed = ?, duration_ms = ?, bitrate = ?, container = ?,
-					video_codec = ?, audio_codec = ?, width = ?, height = ? WHERE id = ?`,
+					video_codec = ?, audio_codec = ?, width = COALESCE(?, width), height = COALESCE(?, height) WHERE id = ?`,
 					state, nullInt64(info.DurationMs), nullInt64(info.Bitrate), nullStr(info.Container),
 					nullStr(info.VideoCodec), nullStr(info.AudioCodec), nullInt(info.Width), nullInt(info.Height), j.id)
 				if err != nil {
@@ -448,8 +570,6 @@ func (s *Scanner) probePending(ctx context.Context) bool {
 	return updated
 }
 
-func itoa(n int) string { return strconv.Itoa(n) }
-
 func kindFor(lt config.LibraryType) dlna.Kind {
 	switch lt {
 	case config.Photos:
@@ -461,6 +581,8 @@ func kindFor(lt config.LibraryType) dlna.Kind {
 	}
 }
 
+func itoa(n int) string { return strconv.Itoa(n) }
+
 func nullInt(n int) sql.NullInt64 { return sql.NullInt64{Int64: int64(n), Valid: n != 0} }
 
 func nullInt64(n int64) sql.NullInt64 { return sql.NullInt64{Int64: n, Valid: n != 0} }
@@ -468,3 +590,7 @@ func nullInt64(n int64) sql.NullInt64 { return sql.NullInt64{Int64: n, Valid: n 
 func nullIntIf(ok bool, n int) sql.NullInt64 { return sql.NullInt64{Int64: int64(n), Valid: ok} }
 
 func nullStr(s string) sql.NullString { return sql.NullString{String: s, Valid: s != ""} }
+
+func nullTime(t time.Time) sql.NullInt64 {
+	return sql.NullInt64{Int64: t.Unix(), Valid: !t.IsZero()}
+}

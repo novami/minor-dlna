@@ -2,7 +2,7 @@
 
 DLNA/UPnP mediální server v Go pro sdílení videí, fotek a hudby z Macu do TV (primárně LG webOS).
 
-Stav: fáze 2 – index v SQLite, pohledy Filmy (A–Z, naposledy přidané, podle roku), Seriály (seriál → série → díl), Složky, přímé přehrávání se seekem. Délku a rozlišení doplní ffprobe (`brew install ffmpeg`). Návrh: [docs/NAVRH.md](docs/NAVRH.md).
+Stav: fáze 3 – index v SQLite, pohledy Filmy (A–Z, naposledy přidané, podle roku), Seriály (seriál → série → díl), Složky, přímé přehrávání se seekem. Fotky podle data s náhledy (vč. HEIC), hudba podle interpretů, alb a žánrů s obaly. Délku, rozlišení a náhledy videí doplní ffmpeg (`brew install ffmpeg`). Návrh: [docs/NAVRH.md](docs/NAVRH.md).
 
 ## Spuštění
 
