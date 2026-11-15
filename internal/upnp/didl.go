@@ -2,6 +2,7 @@ package upnp
 
 import (
 	"encoding/xml"
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -31,10 +32,20 @@ func DIDL(objs []library.Object, baseURL string) string {
 		b.WriteString(`<item id="` + esc(o.ID) + `" parentID="` + esc(o.ParentID) + `" restricted="1">`)
 		b.WriteString(`<dc:title>` + esc(o.Title) + `</dc:title>`)
 		b.WriteString(`<upnp:class>` + itemClass(o.Format.Kind) + `</upnp:class>`)
-		if !o.ModTime.IsZero() {
+		switch {
+		case o.Year > 0:
+			b.WriteString(`<dc:date>` + strconv.Itoa(o.Year) + `-01-01</dc:date>`)
+		case !o.ModTime.IsZero():
 			b.WriteString(`<dc:date>` + o.ModTime.UTC().Format("2006-01-02T15:04:05") + `</dc:date>`)
 		}
-		b.WriteString(`<res protocolInfo="` + esc(dlna.ProtocolInfo(o.Format)) + `" size="` + strconv.FormatInt(o.Size, 10) + `">`)
+		b.WriteString(`<res protocolInfo="` + esc(dlna.ProtocolInfo(o.Format)) + `" size="` + strconv.FormatInt(o.Size, 10) + `"`)
+		if o.DurationMs > 0 {
+			b.WriteString(` duration="` + formatDuration(o.DurationMs) + `"`)
+		}
+		if o.Width > 0 && o.Height > 0 {
+			b.WriteString(` resolution="` + strconv.Itoa(o.Width) + "x" + strconv.Itoa(o.Height) + `"`)
+		}
+		b.WriteString(`>`)
 		b.WriteString(esc(baseURL + o.MediaPath))
 		b.WriteString(`</res></item>`)
 	}
@@ -57,4 +68,9 @@ func esc(s string) string {
 	var b strings.Builder
 	_ = xml.EscapeText(&b, []byte(s))
 	return b.String()
+}
+
+// formatDuration renders H:MM:SS.mmm as used by the res@duration attribute.
+func formatDuration(ms int64) string {
+	return fmt.Sprintf("%d:%02d:%02d.%03d", ms/3600000, ms/60000%60, ms/1000%60, ms%1000)
 }

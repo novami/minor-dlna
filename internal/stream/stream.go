@@ -14,13 +14,13 @@ import (
 const Prefix = "/media/"
 
 // Handler serves GET/HEAD requests under Prefix.
-func Handler(tree *library.Tree) http.Handler {
+func Handler(cat *library.Catalog) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
-		o, err := tree.ResolveMedia(strings.TrimPrefix(r.URL.Path, Prefix))
+		o, err := cat.ResolveMedia(r.Context(), strings.TrimPrefix(r.URL.Path, Prefix))
 		if err != nil {
 			http.NotFound(w, r)
 			return

@@ -19,7 +19,9 @@ import (
 
 	"github.com/novami/minor-dlna/internal/config"
 	"github.com/novami/minor-dlna/internal/library"
+	"github.com/novami/minor-dlna/internal/media"
 	"github.com/novami/minor-dlna/internal/ssdp"
+	"github.com/novami/minor-dlna/internal/store"
 	"github.com/novami/minor-dlna/internal/stream"
 	"github.com/novami/minor-dlna/internal/upnp"
 	"github.com/novami/minor-dlna/internal/version"
@@ -56,13 +58,27 @@ func run(cfgPath string) error {
 		slog.Warn("no libraries configured", "config", cfgPath)
 	}
 
-	tree := library.New(cfg.Libraries)
-	dev := upnp.New(cfg.Name, cfg.UUID, version.Version, tree)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	st, err := store.Open(filepath.Join(filepath.Dir(cfgPath), "library.db"))
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	cat, err := library.NewCatalog(ctx, st, cfg.Libraries)
+	if err != nil {
+		return err
+	}
+	dev := upnp.New(cfg.Name, cfg.UUID, version.Version, cat)
+	scanner := library.NewScanner(cat, media.NewProber(""))
+	scanner.OnChange = func(uint32) { dev.NotifyChange() }
+	go scanner.Run(ctx)
 	serverName := fmt.Sprintf("%s/1.0 UPnP/1.0 MinorDLNA/%s", runtime.GOOS, version.Version)
 
 	mux := http.NewServeMux()
 	dev.Register(mux)
-	mux.Handle(stream.Prefix, stream.Handler(tree))
+	mux.Handle(stream.Prefix, stream.Handler(cat))
 
 	srv := &http.Server{
 		Addr:              ":" + strconv.Itoa(cfg.Port),
@@ -74,9 +90,6 @@ func run(cfgPath string) error {
 	if err != nil {
 		return err
 	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	disc := &ssdp.Server{
 		UUID:       cfg.UUID,

@@ -1,6 +1,7 @@
 package upnp
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,16 +12,30 @@ import (
 
 	"github.com/novami/minor-dlna/internal/config"
 	"github.com/novami/minor-dlna/internal/library"
+	"github.com/novami/minor-dlna/internal/media"
+	"github.com/novami/minor-dlna/internal/store"
 	"github.com/novami/minor-dlna/internal/stream"
 )
 
 func setup(t *testing.T) *httptest.Server {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "Film & co.mp4"), []byte("0123456789"), 0o644)
-	tree := library.New([]config.Library{{Name: "Filmy", Type: config.Movies, Paths: []string{dir}}})
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	cat, err := library.NewCatalog(ctx, st, []config.Library{{Name: "Filmy", Type: config.Movies, Paths: []string{dir}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := library.NewScanner(cat, media.NewProber("/nonexistent")).ScanLibrary(ctx, cat.Libraries()[0]); err != nil {
+		t.Fatal(err)
+	}
 	mux := http.NewServeMux()
-	New("Test", "uuid-1", "dev", tree).Register(mux)
-	mux.Handle(stream.Prefix, stream.Handler(tree))
+	New("Test", "uuid-1", "dev", cat).Register(mux)
+	mux.Handle(stream.Prefix, stream.Handler(cat))
 	ts := httptest.NewServer(mux)
 	t.Cleanup(ts.Close)
 	return ts
@@ -47,7 +62,7 @@ func TestBrowseAndStream(t *testing.T) {
 	if out := soap(t, ts.URL, "0", "BrowseDirectChildren"); !strings.Contains(out, "&lt;dc:title&gt;Filmy&lt;/dc:title&gt;") {
 		t.Fatalf("root missing library: %s", out)
 	}
-	out := soap(t, ts.URL, "L0", "BrowseDirectChildren")
+	out := soap(t, ts.URL, "L1/all", "BrowseDirectChildren")
 	if !strings.Contains(out, "<TotalMatches>1</TotalMatches>") || !strings.Contains(out, "Film &amp;amp; co") {
 		t.Fatalf("unexpected listing: %s", out)
 	}
@@ -76,7 +91,7 @@ func TestBrowseAndStream(t *testing.T) {
 
 func TestBrowseUnknownObject(t *testing.T) {
 	ts := setup(t)
-	if out := soap(t, ts.URL, "L9", "BrowseMetadata"); !strings.Contains(out, "<errorCode>701</errorCode>") {
+	if out := soap(t, ts.URL, "I999", "BrowseMetadata"); !strings.Contains(out, "<errorCode>701</errorCode>") {
 		t.Fatalf("expected 701: %s", out)
 	}
 }

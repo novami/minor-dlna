@@ -14,7 +14,7 @@ Mediální server v Go pro sdílení videí, fotek a hudby z Macu do TV (primár
 - Jedna binárka, běh jako launchd agent, data v `~/Library/Application Support/MinorDLNA`.
 - DLNA Media Server: SSDP, ContentDirectory (Browse/Search), streamování se seekem.
 - Knihovny: Filmy, Seriály, Videa, Fotky, **Hudba**.
-- Index v SQLite, sledování změn (FSEvents přes fsnotify) + periodický rescan.
+- Index v SQLite, detekce změn podle mtime složek + periodický plný rescan.
 - Metadata ze souborů: ffprobe, EXIF, hudební tagy (ID3/Vorbis/MP4).
 - **Metadata z TMDb** (plakáty, popisy, žánry, obsazení, seriály) – opt-in, vlastní API klíč.
 - Náhledy a odvozená rozlišení fotek, HEIC → JPEG.
@@ -55,8 +55,7 @@ cmd/minordlna/main.go        CLI: serve | install | uninstall | scan
 internal/config/             YAML + flags, výchozí hodnoty
 internal/ssdp/               server (announce/odpovědi) + klient (hledání TV)
 internal/upnp/               device description, SOAP router, GENA eventing
-internal/upnp/cds/           ContentDirectory
-internal/upnp/cms/           ConnectionManager
+internal/upnp/               (CDS, CMS a GENA zatím v jednom balíčku; rozdělit, až naroste)
 internal/upnp/dmc/           control point: AVTransport, RenderingControl
 internal/didl/               DIDL-Lite (pro Browse i SetAVTransportURI)
 internal/dlna/               protocolInfo, DLNA.ORG_* příznaky, hlavičky
@@ -149,9 +148,9 @@ Správa: jeden ffmpeg proces na stream, ukončení při odpojení (context cance
 
 **Hudba** – tagy přes `dhowden/tag` (ID3v2, FLAC, MP4, OGG), obal z tagu nebo `cover.jpg`/`folder.jpg`; formáty pro LG direct: MP3, AAC, FLAC, WAV; ALAC/Opus/APE → FLAC.
 
-**Index (SQLite):** `library`, `item` (cesta, typ, velikost, mtime), `media_stream`, `photo_meta`, `movie`, `show`/`season`/`episode`, `artist`/`album`/`track`, `tmdb_cache`, `image`, `play_state` (item, pozice, délka, zhlédnuto, naposledy), `client`, `renderer`. Rescan jen změněných souborů (size+mtime).
+**Index (SQLite):** od fáze 2 `library`, `dir` (jen složky s médii), `show`, `item` (soubor + parsované údaje + technické údaje z ffprobe v jedné tabulce), `meta` (SystemUpdateID). Další fáze přidají migracemi `photo_meta`, `artist`/`album`/`track`, `tmdb_cache`, `image`, `play_state`, `client`, `renderer`. Rescan zapisuje jen změněné soubory (size+mtime). ID objektů (`I<id>`, `D<id>`, `S<id>`) jsou stabilní napříč restarty.
 
-**Watcher:** fsnotify (na macOS kqueue – limit otevřených deskriptorů, u velkých stromů hlídat jen složky, ne soubory) s debounce 30 s; síťové svazky (SMB/NAS) jen periodický rescan.
+**Detekce změn (místo fsnotify):** fsnotify na macOS používá kqueue s jedním deskriptorem na soubor, což u velkých knihoven narazí na limity. Proto každou minutu `stat` všech známých složek – změněné mtime složky (přidání/smazání/přejmenování) spustí rescan knihovny; soubory mladší 2 min se považují za kopírované a knihovna se zkontroluje znovu. Plný rescan každých 6 h zachytí úpravy souborů na místě. Funguje stejně i na síťových svazcích, bez závislosti.
 
 ## 7. Stav sledování
 
@@ -221,7 +220,6 @@ updates:
 | HTTP, XML, SOAP | stdlib |
 | Multicast | `golang.org/x/net/ipv4` |
 | DB | `modernc.org/sqlite` |
-| Sledování souborů | `github.com/fsnotify/fsnotify` |
 | EXIF | `github.com/rwcarlsen/goexif` |
 | Hudební tagy | `github.com/dhowden/tag` |
 | Zmenšování obrázků | `golang.org/x/image/draw` |

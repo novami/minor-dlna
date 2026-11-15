@@ -3,7 +3,7 @@ package upnp
 
 import (
 	"bytes"
-	"crypto/rand"
+	"context"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -15,8 +15,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"sync/atomic"
-	"time"
 
 	"github.com/novami/minor-dlna/internal/dlna"
 	"github.com/novami/minor-dlna/internal/library"
@@ -30,18 +28,23 @@ const (
 )
 
 type Server struct {
-	Name     string
-	UUID     string
-	Version  string
-	Tree     *library.Tree
-	updateID atomic.Uint32
-	icons    map[int][]byte
+	Name    string
+	UUID    string
+	Version string
+	Cat     *library.Catalog
+	icons   map[int][]byte
+	cdsEv   *eventer
+	cmsEv   *eventer
 }
 
-func New(name, uuid, version string, tree *library.Tree) *Server {
-	s := &Server{Name: name, UUID: uuid, Version: version, Tree: tree, icons: map[int][]byte{}}
-	// SystemUpdateID must change across restarts so clients drop cached listings.
-	s.updateID.Store(uint32(time.Now().Unix()))
+func New(name, uuid, version string, cat *library.Catalog) *Server {
+	s := &Server{Name: name, UUID: uuid, Version: version, Cat: cat, icons: map[int][]byte{}}
+	s.cdsEv = newEventer(func() [][2]string {
+		return [][2]string{{"SystemUpdateID", s.updateID()}, {"ContainerUpdateIDs", ""}}
+	})
+	s.cmsEv = newEventer(func() [][2]string {
+		return [][2]string{{"SourceProtocolInfo", dlna.SourceProtocolInfo()}, {"SinkProtocolInfo", ""}, {"CurrentConnectionIDs", "0"}}
+	})
 	for _, sz := range []int{48, 120} {
 		s.icons[sz] = renderIcon(sz)
 	}
@@ -55,8 +58,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.HandleFunc("GET /cms.xml", xmlHandler(cmsSCPD))
 	mux.HandleFunc("POST /cds/control", s.control(CDSType, s.cdsAction))
 	mux.HandleFunc("POST /cms/control", s.control(CMSType, s.cmsAction))
-	mux.HandleFunc("/cds/event", s.event)
-	mux.HandleFunc("/cms/event", s.event)
+	mux.HandleFunc("/cds/event", s.cdsEv.handle)
+	mux.HandleFunc("/cms/event", s.cmsEv.handle)
 	mux.HandleFunc("GET /icon/{size}", s.icon)
 }
 
@@ -83,24 +86,11 @@ func (s *Server) icon(w http.ResponseWriter, r *http.Request) {
 	w.Write(b)
 }
 
-// event accepts GENA subscriptions so clients don't error out. Change notifications come with the library index.
-func (s *Server) event(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case "SUBSCRIBE":
-		sid := r.Header.Get("SID")
-		if sid == "" {
-			var b [16]byte
-			_, _ = rand.Read(b[:])
-			sid = fmt.Sprintf("uuid:%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
-		}
-		w.Header().Set("SID", sid)
-		w.Header().Set("TIMEOUT", "Second-1800")
-		w.WriteHeader(http.StatusOK)
-	case "UNSUBSCRIBE":
-		w.WriteHeader(http.StatusOK)
-	default:
-		w.WriteHeader(http.StatusMethodNotAllowed)
-	}
+// NotifyChange tells subscribed clients that the library changed.
+func (s *Server) NotifyChange() { s.cdsEv.notifyAll() }
+
+func (s *Server) updateID() string {
+	return strconv.FormatUint(uint64(s.Cat.UpdateID(context.Background())), 10)
 }
 
 // --- SOAP ---
@@ -196,7 +186,7 @@ func (s *Server) cdsAction(r *http.Request, action string, in map[string]string)
 	case "GetSortCapabilities":
 		return []arg{{"SortCaps", "dc:title"}}, nil
 	case "GetSystemUpdateID":
-		return []arg{{"Id", strconv.FormatUint(uint64(s.updateID.Load()), 10)}}, nil
+		return []arg{{"Id", s.updateID()}}, nil
 	}
 	return nil, errInvalidAction
 }
@@ -212,23 +202,21 @@ func (s *Server) browse(r *http.Request, in map[string]string) ([]arg, error) {
 	total := 0
 	switch in["BrowseFlag"] {
 	case "BrowseMetadata":
-		o, err := s.Tree.Metadata(id)
+		o, err := s.Cat.Metadata(r.Context(), id)
 		if err != nil {
 			return nil, errNoSuchObject
 		}
 		objs, total = []library.Object{o}, 1
 	case "BrowseDirectChildren":
-		all, err := s.Tree.Children(id)
-		if err != nil {
+		var err error
+		objs, total, err = s.Cat.Children(r.Context(), id, start, count)
+		if errors.Is(err, library.ErrNotFound) {
 			return nil, errNoSuchObject
 		}
-		total = len(all)
-		start = min(start, total)
-		end := total
-		if count > 0 {
-			end = min(start+count, total)
+		if err != nil {
+			slog.Error("browse", "id", id, "err", err)
+			return nil, &upnpError{501, "Action Failed"}
 		}
-		objs = all[start:end]
 	default:
 		return nil, errInvalidArgs
 	}
@@ -236,7 +224,7 @@ func (s *Server) browse(r *http.Request, in map[string]string) ([]arg, error) {
 		{"Result", DIDL(objs, "http://"+r.Host)},
 		{"NumberReturned", strconv.Itoa(len(objs))},
 		{"TotalMatches", strconv.Itoa(total)},
-		{"UpdateID", strconv.FormatUint(uint64(s.updateID.Load()), 10)},
+		{"UpdateID", s.updateID()},
 	}, nil
 }
 
