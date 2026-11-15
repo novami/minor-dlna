@@ -18,6 +18,7 @@ const deviceXML = `<?xml version="1.0" encoding="utf-8"?>
     <iconList>
       <icon><mimetype>image/png</mimetype><width>48</width><height>48</height><depth>24</depth><url>/icon/48.png</url></icon>
       <icon><mimetype>image/png</mimetype><width>120</width><height>120</height><depth>24</depth><url>/icon/120.png</url></icon>
+      <icon><mimetype>image/png</mimetype><width>256</width><height>256</height><depth>24</depth><url>/icon/256.png</url></icon>
     </iconList>
     <serviceList>
       <service>
