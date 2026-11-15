@@ -24,6 +24,7 @@ import (
 	"github.com/novami/minor-dlna/internal/store"
 	"github.com/novami/minor-dlna/internal/stream"
 	"github.com/novami/minor-dlna/internal/thumbs"
+	"github.com/novami/minor-dlna/internal/transcode"
 	"github.com/novami/minor-dlna/internal/upnp"
 	"github.com/novami/minor-dlna/internal/version"
 )
@@ -71,11 +72,24 @@ func run(cfgPath string) error {
 	if err != nil {
 		return err
 	}
-	ffmpeg := thumbs.FindFFmpeg()
+	ffmpeg := cfg.Transcode.FFmpeg
+	if ffmpeg == "" {
+		ffmpeg = thumbs.FindFFmpeg()
+	}
+	if ffmpeg == "" {
+		slog.Warn("ffmpeg not found: no transcoding or video thumbnails, unsupported formats will not play; install with: brew install ffmpeg")
+	}
 	cat.VideoThumbs = ffmpeg != ""
 	th := thumbs.New(filepath.Join(filepath.Dir(cfgPath), "cache", "thumbs"), ffmpeg, cat)
 	dev := upnp.New(cfg.Name, cfg.UUID, version.Version, cat)
-	scanner := library.NewScanner(cat, media.NewProber(""))
+	dev.DTS, dev.CanTranscode = cfg.Transcode.DTSEnabled(), ffmpeg != ""
+	tc := transcode.NewService(ffmpeg, cfg.Transcode.HWAccel, cfg.Transcode.MaxSessions, cat)
+	tc.Captions = stream.Captions
+	probe := ""
+	if cfg.Transcode.FFmpeg != "" {
+		probe = filepath.Join(filepath.Dir(cfg.Transcode.FFmpeg), "ffprobe")
+	}
+	scanner := library.NewScanner(cat, media.NewProber(probe))
 	scanner.OnChange = func(uint32) { dev.NotifyChange() }
 	scanner.OnRemove = th.Purge
 	go scanner.Run(ctx)
@@ -85,6 +99,8 @@ func run(cfgPath string) error {
 	dev.Register(mux)
 	mux.Handle(stream.Prefix, stream.Handler(cat))
 	mux.Handle("/thumb/", th)
+	mux.Handle(transcode.Prefix, tc)
+	mux.Handle(stream.SubsPrefix, stream.SubsHandler(cat))
 
 	srv := &http.Server{
 		Addr:              ":" + strconv.Itoa(cfg.Port),

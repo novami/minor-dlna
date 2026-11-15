@@ -36,9 +36,20 @@ type Config struct {
 	Interfaces []string  `yaml:"interfaces"`
 	Allow      []string  `yaml:"allow"`
 	Libraries  []Library `yaml:"libraries"`
+	Transcode  Transcode `yaml:"transcode"`
 
 	allow []netip.Prefix
 }
+
+type Transcode struct {
+	FFmpeg      string `yaml:"ffmpeg"`       // empty = PATH / Homebrew
+	HWAccel     string `yaml:"hwaccel"`      // videotoolbox | none
+	MaxSessions int    `yaml:"max_sessions"` // concurrent ffmpeg processes
+	DTS         *bool  `yaml:"dts"`          // TV decodes DTS (differs by LG model line)
+}
+
+// DTSEnabled defaults to true.
+func (t Transcode) DTSEnabled() bool { return t.DTS == nil || *t.DTS }
 
 // DefaultDir returns the per-user data directory.
 func DefaultDir() string {
@@ -51,9 +62,10 @@ func DefaultDir() string {
 
 func defaults() *Config {
 	return &Config{
-		Name:  "MinorDLNA",
-		Port:  8200,
-		Allow: []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "127.0.0.0/8"},
+		Name:      "MinorDLNA",
+		Port:      8200,
+		Allow:     []string{"10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16", "127.0.0.0/8"},
+		Transcode: Transcode{HWAccel: "videotoolbox", MaxSessions: 2},
 	}
 }
 
@@ -101,6 +113,17 @@ func (c *Config) validate() error {
 	if c.Port <= 0 || c.Port > 65535 {
 		return fmt.Errorf("invalid port %d", c.Port)
 	}
+	switch c.Transcode.HWAccel {
+	case "videotoolbox", "none":
+	case "":
+		c.Transcode.HWAccel = "videotoolbox"
+	default:
+		return fmt.Errorf("transcode.hwaccel: unknown value %q (videotoolbox, none)", c.Transcode.HWAccel)
+	}
+	if c.Transcode.MaxSessions <= 0 {
+		c.Transcode.MaxSessions = 2
+	}
+	c.Transcode.FFmpeg = ExpandHome(c.Transcode.FFmpeg)
 	c.allow = c.allow[:0]
 	for _, a := range c.Allow {
 		p, err := netip.ParsePrefix(a)

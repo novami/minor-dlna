@@ -46,6 +46,7 @@ func Handler(cat *library.Catalog) http.Handler {
 		if r.Method == http.MethodGet {
 			slog.Info("stream", "remote", r.RemoteAddr, "file", o.Title, "range", r.Header.Get("Range"))
 		}
+		Captions(w, r, o)
 		// ServeContent handles Range (206), If-Modified-Since and HEAD.
 		http.ServeContent(w, r, "", o.ModTime, f)
 	})

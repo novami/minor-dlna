@@ -55,6 +55,12 @@ type Object struct {
 	Track       int
 	ArtPath     string // URL path of a JPEG thumbnail, empty if none
 	Class       string // container class override, default storageFolder
+	Container   string // ffprobe format name
+	VideoCodec  string
+	AudioCodec  string
+	PixFmt      string
+	Channels    int
+	Subtitle    string // path of an external .srt
 }
 
 type Library struct {
@@ -420,7 +426,8 @@ func (c *Catalog) itemPage(ctx context.Context, parent string, tc titleCtx, wher
 func (c *Catalog) items(ctx context.Context, parent string, tc titleCtx, where, order string, start, limit int, args ...any) ([]Object, error) {
 	q := `SELECT i.id, i.library_id, i.dir_id, i.path, i.name, i.mime, i.kind, i.size, i.mtime, i.title, i.year,
 		i.season, i.episode, i.episode_title, i.duration_ms, i.width, i.height, s.name,
-		i.orientation, i.taken_at, i.artist, al.title, g.name, i.track, i.has_art
+		i.orientation, i.taken_at, i.artist, al.title, g.name, i.track, i.has_art,
+		i.container, i.video_codec, i.audio_codec, i.pix_fmt, i.audio_channels, i.subtitle
 		FROM item i LEFT JOIN show s ON s.id = i.show_id LEFT JOIN album al ON al.id = i.album_id
 		LEFT JOIN genre g ON g.id = i.genre_id WHERE ` + where + ` ORDER BY ` + order + ` LIMIT ? OFFSET ?`
 	rows, err := c.st.DB.QueryContext(ctx, q, append(args, limit, start)...)
@@ -441,12 +448,17 @@ func (c *Catalog) items(ctx context.Context, parent string, tc titleCtx, where, 
 			orient, taken, track    sql.NullInt64
 			artist, album, genre    sql.NullString
 			hasArt                  bool
+			cont, vc, ac, pix, sub  sql.NullString
+			channels                sql.NullInt64
 		)
 		if err := rows.Scan(&id, &libID, &dirID, &o.Path, &name, &mime, &kind, &o.Size, &mtime, &o.Title, &year,
 			&season, &episode, &epTitle, &dur, &w, &h, &show,
-			&orient, &taken, &artist, &album, &genre, &track, &hasArt); err != nil {
+			&orient, &taken, &artist, &album, &genre, &track, &hasArt,
+			&cont, &vc, &ac, &pix, &channels, &sub); err != nil {
 			return nil, err
 		}
+		o.Container, o.VideoCodec, o.AudioCodec, o.PixFmt = cont.String, vc.String, ac.String, pix.String
+		o.Channels, o.Subtitle = int(channels.Int64), sub.String
 		o.Orientation, o.Track = int(orient.Int64), int(track.Int64)
 		o.Artist, o.Album, o.Genre = artist.String, album.String, genre.String
 		if taken.Valid {

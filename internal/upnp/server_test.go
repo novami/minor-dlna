@@ -11,10 +11,12 @@ import (
 	"testing"
 
 	"github.com/novami/minor-dlna/internal/config"
+	"github.com/novami/minor-dlna/internal/dlna"
 	"github.com/novami/minor-dlna/internal/library"
 	"github.com/novami/minor-dlna/internal/media"
 	"github.com/novami/minor-dlna/internal/store"
 	"github.com/novami/minor-dlna/internal/stream"
+	"github.com/novami/minor-dlna/internal/transcode"
 )
 
 func setup(t *testing.T) *httptest.Server {
@@ -93,5 +95,28 @@ func TestBrowseUnknownObject(t *testing.T) {
 	ts := setup(t)
 	if out := soap(t, ts.URL, "I999", "BrowseMetadata"); !strings.Contains(out, "<errorCode>701</errorCode>") {
 		t.Fatalf("expected 701: %s", out)
+	}
+}
+
+func TestDIDLForLG(t *testing.T) {
+	objs := []library.Object{{
+		ID: "I7", ParentID: "L1/all", Title: "Film", Format: dlna.Format{Kind: dlna.Video, Mime: "video/x-matroska"},
+		MediaPath: "/media/7.mkv", Container: "matroska,webm", VideoCodec: "hevc", AudioCodec: "truehd", Channels: 8,
+		DurationMs: 5400000, Subtitle: "/m/Film.srt",
+	}}
+	lg := RenderOpts{Profile: transcode.Detect("LGE_DLNA_SDK webOS", false), Transcode: true}
+	out := DIDL(objs, "http://h:1", lg)
+	for _, want := range []string{"http://h:1/transcode/7/copy-ac3.ts", "DLNA.ORG_OP=10", `duration="1:30:00.000"`,
+		`<sec:CaptionInfoEx sec:type="srt">http://h:1/subs/7.srt`, "text/srt"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in %s", want, out)
+		}
+	}
+	if strings.Contains(out, "/media/7.mkv") {
+		t.Error("original offered to LG although it cannot play TrueHD")
+	}
+	generic := DIDL(objs, "http://h:1", RenderOpts{Profile: transcode.Generic, Transcode: true})
+	if !strings.Contains(generic, "/media/7.mkv") || strings.Contains(generic, "/transcode/") {
+		t.Error("generic client should get the original")
 	}
 }

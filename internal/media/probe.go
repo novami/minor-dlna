@@ -21,6 +21,8 @@ type Info struct {
 	AudioCodec string
 	Width      int
 	Height     int
+	PixFmt     string
+	Channels   int
 }
 
 type Prober struct {
@@ -57,6 +59,8 @@ type probeJSON struct {
 		CodecName   string `json:"codec_name"`
 		Width       int    `json:"width"`
 		Height      int    `json:"height"`
+		PixFmt      string `json:"pix_fmt"`
+		Channels    int    `json:"channels"`
 		Disposition struct {
 			AttachedPic int `json:"attached_pic"`
 		} `json:"disposition"`
@@ -86,9 +90,9 @@ func (p *Prober) Probe(ctx context.Context, path string) (Info, error) {
 	for _, s := range j.Streams {
 		switch {
 		case s.CodecType == "video" && s.Disposition.AttachedPic == 0 && info.VideoCodec == "":
-			info.VideoCodec, info.Width, info.Height = s.CodecName, s.Width, s.Height
+			info.VideoCodec, info.Width, info.Height, info.PixFmt = s.CodecName, s.Width, s.Height, s.PixFmt
 		case s.CodecType == "audio" && info.AudioCodec == "":
-			info.AudioCodec = s.CodecName
+			info.AudioCodec, info.Channels = s.CodecName, s.Channels
 		}
 	}
 	return info, nil

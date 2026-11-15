@@ -139,11 +139,13 @@ type found struct {
 	mtime  int64
 	relDir string
 	meta   described
+	sub    string // external subtitle path
 }
 
 type existing struct {
 	id          int64
 	size, mtime int64
+	sub         string
 	seen        bool
 }
 
@@ -156,6 +158,7 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib *Library) (scanStats, err
 	want := kindFor(lib.Type)
 	dirMtimes := map[string]time.Time{}
 	var files []found
+	subs := map[string][]string{} // folder → .srt file names
 	recent := false
 	cutoff := time.Now().Add(-settleTime)
 
@@ -184,6 +187,10 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib *Library) (scanStats, err
 				dirMtimes[p] = info.ModTime()
 				return nil
 			}
+			if want == dlna.Video && strings.EqualFold(filepath.Ext(d.Name()), ".srt") {
+				subs[filepath.Dir(p)] = append(subs[filepath.Dir(p)], d.Name())
+				return nil
+			}
 			f, ok := dlna.Lookup(d.Name())
 			if !ok || f.Kind != want || !info.Mode().IsRegular() {
 				return nil
@@ -209,6 +216,9 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib *Library) (scanStats, err
 		}
 	}
 
+	for i := range files {
+		files[i].sub = matchSubtitle(files[i].path, subs[filepath.Dir(files[i].path)])
+	}
 	st, removed, err := s.reconcile(ctx, lib, files)
 	if err != nil {
 		return st, err
@@ -224,7 +234,15 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib *Library) (scanStats, err
 }
 
 func (s *Scanner) existingItems(ctx context.Context, libID int64) (map[string]*existing, error) {
-	rows, err := s.cat.st.DB.QueryContext(ctx, `SELECT id, path, size, mtime FROM item WHERE library_id = ?`, libID)
+	return loadExisting(ctx, s.cat.st.DB, libID)
+}
+
+type querier interface {
+	QueryContext(ctx context.Context, q string, args ...any) (*sql.Rows, error)
+}
+
+func loadExisting(ctx context.Context, db querier, libID int64) (map[string]*existing, error) {
+	rows, err := db.QueryContext(ctx, `SELECT id, path, size, mtime, COALESCE(subtitle, '') FROM item WHERE library_id = ?`, libID)
 	if err != nil {
 		return nil, err
 	}
@@ -233,12 +251,39 @@ func (s *Scanner) existingItems(ctx context.Context, libID int64) (map[string]*e
 	for rows.Next() {
 		var e existing
 		var p string
-		if err := rows.Scan(&e.id, &p, &e.size, &e.mtime); err != nil {
+		if err := rows.Scan(&e.id, &p, &e.size, &e.mtime, &e.sub); err != nil {
 			return nil, err
 		}
 		items[p] = &e
 	}
 	return items, rows.Err()
+}
+
+// matchSubtitle picks "<video>.srt" or "<video>.<lang>.srt", preferring Czech.
+func matchSubtitle(videoPath string, srts []string) string {
+	base := strings.ToLower(strings.TrimSuffix(filepath.Base(videoPath), filepath.Ext(videoPath)))
+	best, bestScore := "", 99
+	for _, name := range srts {
+		stem := strings.ToLower(strings.TrimSuffix(name, filepath.Ext(name)))
+		score := -1
+		switch {
+		case stem == base:
+			score = 1
+		case strings.HasPrefix(stem, base+"."):
+			score = 2
+			switch strings.TrimPrefix(stem, base+".") {
+			case "cs", "cz", "cze", "ces", "czech", "cesky", "česky":
+				score = 0
+			}
+		}
+		if score >= 0 && score < bestScore {
+			best, bestScore = name, score
+		}
+	}
+	if best == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(videoPath), best)
 }
 
 func (s *Scanner) reconcile(ctx context.Context, lib *Library, files []found) (scanStats, []int64, error) {
@@ -249,21 +294,10 @@ func (s *Scanner) reconcile(ctx context.Context, lib *Library, files []found) (s
 	}
 	defer tx.Rollback()
 
-	items := map[string]*existing{}
-	rows, err := tx.QueryContext(ctx, `SELECT id, path, size, mtime FROM item WHERE library_id = ?`, lib.ID)
+	items, err := loadExisting(ctx, tx, lib.ID)
 	if err != nil {
 		return st, nil, err
 	}
-	for rows.Next() {
-		var e existing
-		var p string
-		if err := rows.Scan(&e.id, &p, &e.size, &e.mtime); err != nil {
-			rows.Close()
-			return st, nil, err
-		}
-		items[p] = &e
-	}
-	rows.Close()
 	firstScan := len(items) == 0
 
 	type dirKey struct {
@@ -272,7 +306,7 @@ func (s *Scanner) reconcile(ctx context.Context, lib *Library, files []found) (s
 	}
 	dirs := map[dirKey]int64{}
 	usedDirs := map[int64]bool{}
-	rows, err = tx.QueryContext(ctx, `SELECT id, root, rel FROM dir WHERE library_id = ?`, lib.ID)
+	rows, err := tx.QueryContext(ctx, `SELECT id, root, rel FROM dir WHERE library_id = ?`, lib.ID)
 	if err != nil {
 		return st, nil, err
 	}
@@ -331,6 +365,13 @@ func (s *Scanner) reconcile(ctx context.Context, lib *Library, files []found) (s
 		if ok {
 			e.seen = true
 			if e.size == f.size && e.mtime == f.mtime {
+				// Subtitles can appear or disappear without the video changing.
+				if e.sub != f.sub {
+					if _, err := tx.ExecContext(ctx, `UPDATE item SET subtitle = ? WHERE id = ?`, nullStr(f.sub), e.id); err != nil {
+						return st, nil, err
+					}
+					st.updated++
+				}
 				continue
 			}
 		}
@@ -342,11 +383,11 @@ func (s *Scanner) reconcile(ctx context.Context, lib *Library, files []found) (s
 		cols := []any{dirID, f.size, f.mtime, m.title, SortKey(m.sortTitle), nullInt(m.year), ref.show,
 			nullIntIf(m.show != "", m.season), nullIntIf(m.show != "", m.episode), nullStr(m.epTitle),
 			nullTime(m.taken), nullInt(m.width), nullInt(m.height), nullInt(m.orientation),
-			nullStr(m.artist), ref.artist, ref.album, ref.genre, nullInt(m.disc), nullInt(m.track), m.hasArt}
+			nullStr(m.artist), ref.artist, ref.album, ref.genre, nullInt(m.disc), nullInt(m.track), m.hasArt, nullStr(f.sub)}
 		if ok {
 			_, err = tx.ExecContext(ctx, `UPDATE item SET dir_id = ?, size = ?, mtime = ?, title = ?, sort_title = ?, year = ?,
 				show_id = ?, season = ?, episode = ?, episode_title = ?, taken_at = ?, width = ?, height = ?, orientation = ?,
-				artist = ?, artist_id = ?, album_id = ?, genre_id = ?, disc = ?, track = ?, has_art = ?, probed = 0 WHERE id = ?`,
+				artist = ?, artist_id = ?, album_id = ?, genre_id = ?, disc = ?, track = ?, has_art = ?, subtitle = ?, probed = 0 WHERE id = ?`,
 				append(cols, e.id)...)
 			st.updated++
 		} else {
@@ -357,8 +398,8 @@ func (s *Scanner) reconcile(ctx context.Context, lib *Library, files []found) (s
 			}
 			_, err = tx.ExecContext(ctx, `INSERT INTO item (dir_id, size, mtime, title, sort_title, year,
 				show_id, season, episode, episode_title, taken_at, width, height, orientation,
-				artist, artist_id, album_id, genre_id, disc, track, has_art, library_id, path, name, kind, mime, added_at)
-				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				artist, artist_id, album_id, genre_id, disc, track, has_art, subtitle, library_id, path, name, kind, mime, added_at)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 				append(cols, lib.ID, f.path, filepath.Base(f.path), int(f.format.Kind), f.format.Mime, added)...)
 			st.added++
 		}
@@ -556,9 +597,11 @@ func (s *Scanner) probePending(ctx context.Context) bool {
 					slog.Debug("probe failed", "path", j.path, "err", err)
 				}
 				_, err = s.cat.st.DB.ExecContext(ctx, `UPDATE item SET probed = ?, duration_ms = ?, bitrate = ?, container = ?,
-					video_codec = ?, audio_codec = ?, width = COALESCE(?, width), height = COALESCE(?, height) WHERE id = ?`,
+					video_codec = ?, audio_codec = ?, width = COALESCE(?, width), height = COALESCE(?, height),
+					pix_fmt = ?, audio_channels = ? WHERE id = ?`,
 					state, nullInt64(info.DurationMs), nullInt64(info.Bitrate), nullStr(info.Container),
-					nullStr(info.VideoCodec), nullStr(info.AudioCodec), nullInt(info.Width), nullInt(info.Height), j.id)
+					nullStr(info.VideoCodec), nullStr(info.AudioCodec), nullInt(info.Width), nullInt(info.Height),
+					nullStr(info.PixFmt), nullInt(info.Channels), j.id)
 				if err != nil {
 					slog.Error("probe update", "err", err)
 				}

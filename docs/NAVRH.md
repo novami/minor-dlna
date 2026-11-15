@@ -62,9 +62,8 @@ internal/dlna/               protocolInfo, DLNA.ORG_* příznaky, hlavičky
 internal/library/            scanner, watcher, klasifikace, parser názvů
 internal/media/              ffprobe, EXIF, hudební tagy, náhledy, HEIC
 internal/metadata/tmdb/      vyhledání, detail, obrázky, rate limit
-internal/transcode/          rozhodování, ffmpeg sessions, HLS segmenty
+internal/transcode/          profily klientů, rozhodování, ffmpeg sessions, HLS segmenty
 internal/playstate/          pozice, zhlédnuto, pokračovat
-internal/profiles/           detekce klienta, schopnosti
 internal/store/              schéma, migrace, dotazy
 internal/stream/             HTTP handler médií, Range, TimeSeekRange
 internal/web/                html/template + htmx, REST API, hls.js
@@ -94,7 +93,7 @@ internal/version/            verze vložená při buildu (-ldflags)
 - Direct play: `http.ServeContent` (Range, 206, HEAD).
 - Hlavičky `transferMode.dlna.org` (Streaming / Interactive pro foto) a `contentFeatures.dlna.org` (`DLNA.ORG_OP=01` byte-seek; u transkódu `OP=10` time-seek, `CI=1`).
 - `TimeSeekRange.dlna.org: npt=…` → ffmpeg `-ss`; fallback odhad času z bajtového offsetu.
-- Titulky: hlavička `CaptionInfo.sec`, `<sec:CaptionInfoEx>` v DIDL, `res` s `text/srt`.
+- Titulky: externí `<video>.srt` nebo `<video>.<jazyk>.srt` (přednost má čeština), hlavička `CaptionInfo.sec`, `<sec:CaptionInfoEx>` v DIDL, `res` s `text/srt`; soubory v CP1250 se posílají převedené do UTF-8. Vestavěné titulky v MKV přehraje TV sama při direct play; při remuxu do MPEG-TS se zahazují (TS textové titulky neunese).
 
 **Fotky** – odvozeniny `JPEG_TN` (160 px), `JPEG_SM` (640×480), `JPEG_LRG` (≤ 4096 px) s aplikovanou EXIF orientací, generované až při prvním požadavku a cachované v `cache/thumbs` (klíč obsahuje mtime+velikost souboru, smazané položky se z cache čistí). JPEG do 4096 px bez rotace se posílá jako originál. HEIC/HEIF převádí systémový `sips` (součást macOS, bez ffmpeg); datum pořízení a rozměry HEIC čte také `sips`. Náhledy videí generuje ffmpeg (snímek v 10 % délky), bez ffmpeg se nenabízejí. Pohledy: Podle data (rok → měsíc, EXIF datum, jinak mtime), Složky.
 
@@ -120,9 +119,12 @@ internal/version/            verze vložená při buildu (-ldflags)
 - Kontejnery: MKV, MP4, MOV, TS, AVI, WebM.
 - Video: H.264, HEVC (10bit, HDR10, HLG, Dolby Vision profil 5/8 v MP4/MKV), VP9, AV1.
 - Audio: AAC, AC3, EAC3 (vč. Atmos), MP3, FLAC, PCM; DTS dle řady (přepínač `dts: true|false`, výchozí `true` pro 2023+).
-- Detekce: User-Agent `LGE`/`webOS`/`LG-`; ruční přiřazení profilu k IP ve web UI.
+- Detekce: User-Agent `LGE`/`webOS`/`LG-` → profil LG, ostatní klienti „generic“ (vše direct). Ruční přiřazení profilu k IP přijde s web UI.
+- Plán (direct / kopie videa + převod zvuku / převod videa) se kóduje do URL streamu (`/transcode/<id>/copy-ac3.ts`), aby nezávisel na User-Agentu přehrávače, který stream stahuje; neznámé hodnoty se odmítají.
+- Zvuk: >2 kanály → AC3 640k 5.1, jinak AAC 192k. Video → H.264 (VideoToolbox, nebo libx264 při `hwaccel: none`), max. 1080p. VP9/AV1 se při nutném remuxu převádí (MPEG-TS je neunese). Hudba ALAC/APE/WMA → FLAC.
+- Seek u převáděných streamů jen časový (`TimeSeekRange.dlna.org`, `OP=10`); bajtové rozsahy se nenabízejí, protože velikost výstupu není známá. HDR → SDR tone mapping zatím není.
 
-Správa: jeden ffmpeg proces na stream, ukončení při odpojení (context cancel), limit souběžných transkódů (výchozí 2), HLS segmenty v dočasné složce s úklidem.
+Správa: jeden ffmpeg proces na stream, ukončení při odpojení (context cancel), limit souběžných transkódů (výchozí 2, při plném limitu čeká 5 s – TV se často hned znovu připojuje), HLS segmenty v dočasné složce s úklidem (fáze 8).
 
 ## 6. Knihovna a metadata
 

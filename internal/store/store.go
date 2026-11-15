@@ -114,6 +114,12 @@ var migrations = []string{
 	CREATE INDEX album_artist ON album (artist_id, sort_title);
 	-- Photos and music indexed before this migration lack metadata: force a re-read on next scan.
 	UPDATE item SET mtime = 0 WHERE kind IN (2, 3);`,
+
+	// Transcoding decisions and subtitles.
+	`ALTER TABLE item ADD COLUMN pix_fmt TEXT;
+	ALTER TABLE item ADD COLUMN audio_channels INTEGER;
+	ALTER TABLE item ADD COLUMN subtitle TEXT;
+	UPDATE item SET probed = 0 WHERE kind IN (1, 3);`,
 }
 
 // Open opens (and migrates) the database at path.

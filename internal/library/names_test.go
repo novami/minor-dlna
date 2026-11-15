@@ -46,3 +46,16 @@ func TestSortKey(t *testing.T) {
 		t.Fatal("natural order broken")
 	}
 }
+
+func TestMatchSubtitle(t *testing.T) {
+	srts := []string{"Film.en.srt", "Film.srt", "Film.cz.srt", "Jiný.srt"}
+	if got := matchSubtitle("/m/Film.mkv", srts); got != "/m/Film.cz.srt" {
+		t.Fatalf("got %q", got)
+	}
+	if got := matchSubtitle("/m/Film.mkv", []string{"Film.en.srt"}); got != "/m/Film.en.srt" {
+		t.Fatalf("got %q", got)
+	}
+	if got := matchSubtitle("/m/Other.mkv", srts); got != "" {
+		t.Fatalf("got %q", got)
+	}
+}

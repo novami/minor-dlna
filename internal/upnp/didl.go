@@ -9,23 +9,32 @@ import (
 	"github.com/novami/minor-dlna/internal/dlna"
 	"github.com/novami/minor-dlna/internal/library"
 	"github.com/novami/minor-dlna/internal/media"
+	"github.com/novami/minor-dlna/internal/stream"
 	"github.com/novami/minor-dlna/internal/thumbs"
+	"github.com/novami/minor-dlna/internal/transcode"
 )
 
 const didlHeader = `<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" ` +
 	`xmlns:dc="http://purl.org/dc/elements/1.1/" ` +
 	`xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" ` +
-	`xmlns:dlna="urn:schemas-dlna-org:metadata-1-0/">`
+	`xmlns:dlna="urn:schemas-dlna-org:metadata-1-0/" ` +
+	`xmlns:sec="http://www.sec.co.kr/">`
+
+// RenderOpts tailor resources to the requesting client.
+type RenderOpts struct {
+	Profile   transcode.Profile
+	Transcode bool // ffmpeg available
+}
 
 // DIDL renders objects as DIDL-Lite. baseURL is "http://host:port" as seen by the client.
-func DIDL(objs []library.Object, baseURL string) string {
+func DIDL(objs []library.Object, baseURL string, opts RenderOpts) string {
 	var b strings.Builder
 	b.WriteString(didlHeader)
 	for _, o := range objs {
 		if o.IsDir {
 			writeContainer(&b, o, baseURL)
 		} else {
-			writeItem(&b, o, baseURL)
+			writeItem(&b, o, baseURL, opts)
 		}
 	}
 	b.WriteString(`</DIDL-Lite>`)
@@ -50,7 +59,7 @@ func writeContainer(b *strings.Builder, o library.Object, baseURL string) {
 	b.WriteString(`</container>`)
 }
 
-func writeItem(b *strings.Builder, o library.Object, baseURL string) {
+func writeItem(b *strings.Builder, o library.Object, baseURL string, opts RenderOpts) {
 	b.WriteString(`<item id="` + esc(o.ID) + `" parentID="` + esc(o.ParentID) + `" restricted="1">`)
 	b.WriteString(`<dc:title>` + esc(o.Title) + `</dc:title>`)
 	b.WriteString(`<upnp:class>` + itemClass(o.Format.Kind) + `</upnp:class>`)
@@ -77,11 +86,32 @@ func writeItem(b *strings.Builder, o library.Object, baseURL string) {
 		}
 	}
 	writeArt(b, o, baseURL)
+	subURL := ""
+	if o.Subtitle != "" {
+		subURL = baseURL + stream.SubtitlePath(o.ID)
+		b.WriteString(`<sec:CaptionInfoEx sec:type="srt">` + esc(subURL) + `</sec:CaptionInfoEx>`)
+	}
 
-	if o.Format.Kind == dlna.Image {
+	switch {
+	case o.Format.Kind == dlna.Image:
 		writePhotoRes(b, o, baseURL)
-	} else {
-		writeRes(b, dlna.ProtocolInfo(o.Format), o.Size, o.DurationMs, o.Width, o.Height, baseURL+o.MediaPath)
+	default:
+		plan := transcode.Plan{}
+		if opts.Transcode {
+			plan = transcode.Decide(opts.Profile, transcode.Media{
+				Audio: o.Format.Kind == dlna.Audio, Container: o.Container, VideoCodec: o.VideoCodec,
+				AudioCodec: o.AudioCodec, PixFmt: o.PixFmt, Channels: o.Channels,
+			})
+		}
+		if plan.Direct() {
+			writeRes(b, dlna.ProtocolInfo(o.Format), o.Size, o.DurationMs, o.Width, o.Height, baseURL+o.MediaPath)
+		} else {
+			// Only the converted stream: offering the original too lets the TV pick a format it can't play.
+			writeRes(b, transcode.ProtocolInfo(plan), 0, o.DurationMs, o.Width, o.Height, baseURL+transcode.Path(o.ID, plan))
+		}
+	}
+	if subURL != "" {
+		writeRes(b, "http-get:*:text/srt:*", 0, 0, 0, 0, subURL)
 	}
 	b.WriteString(`</item>`)
 }

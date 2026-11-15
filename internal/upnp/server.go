@@ -19,6 +19,7 @@ import (
 
 	"github.com/novami/minor-dlna/internal/dlna"
 	"github.com/novami/minor-dlna/internal/library"
+	"github.com/novami/minor-dlna/internal/transcode"
 )
 
 const (
@@ -29,6 +30,10 @@ const (
 )
 
 type Server struct {
+	// DTS and CanTranscode feed the per-client playback decision.
+	DTS          bool
+	CanTranscode bool
+
 	Name    string
 	UUID    string
 	Version string
@@ -85,6 +90,10 @@ func (s *Server) icon(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "image/png")
 	w.Write(b)
+}
+
+func (s *Server) renderOpts(r *http.Request) RenderOpts {
+	return RenderOpts{Profile: transcode.Detect(r.UserAgent(), s.DTS), Transcode: s.CanTranscode}
 }
 
 // NotifyChange tells subscribed clients that the library changed.
@@ -222,7 +231,7 @@ func (s *Server) browse(r *http.Request, in map[string]string) ([]arg, error) {
 		return nil, errInvalidArgs
 	}
 	return []arg{
-		{"Result", DIDL(objs, "http://"+r.Host)},
+		{"Result", DIDL(objs, "http://"+r.Host, s.renderOpts(r))},
 		{"NumberReturned", strconv.Itoa(len(objs))},
 		{"TotalMatches", strconv.Itoa(total)},
 		{"UpdateID", s.updateID()},
