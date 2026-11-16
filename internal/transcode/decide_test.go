@@ -89,7 +89,10 @@ func TestDetectBrands(t *testing.T) {
 func TestResolver(t *testing.T) {
 	r := NewResolver(false, map[string]string{"10.0.0.9": "panasonic", "10.0.0.8": "bogus"})
 	// The browser User-Agent names no brand, the renderer description does.
-	r.Observe("10.0.0.5", "Obývák", "Samsung Electronics QE55Q80")
+	r.ObserveDevice("10.0.0.5", "Obývák", "Samsung Electronics.", "QE55Q80")
+	if c := r.Clients()[0]; c.Maker != "Samsung Electronics" || c.Model != "QE55Q80" {
+		t.Errorf("device: got %q %q", c.Maker, c.Model)
+	}
 	if p := r.For("10.0.0.5", "Linux UPnP/1.0"); p.Name != "samsung" {
 		t.Errorf("merged ident: got %s", p.Name)
 	}

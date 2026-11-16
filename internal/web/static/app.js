@@ -539,7 +539,7 @@ function clientsCard() {
   return head + `<div class="meta-list">${clients.clients.map((c) => `
       <div class="meta-row">
         <div class="ph">📺</div>
-        <div class="meta-text"><b>${esc(c.name || c.ip)}</b><small title="${esc(c.ident)}">${c.name ? esc(c.ip) + " · " : ""}${esc(c.ident || "dosud nepřipojeno")}</small></div>
+        <div class="meta-text">${clientTitle(c)}<small title="${esc(c.ident)}">${esc([c.maker ? c.model : c.ident || "dosud nepřipojeno", c.ip].filter(Boolean).join(" · "))}</small></div>
         <select onchange="setClientProfile('${esc(c.ip)}', this.value)">
           <option value="" ${c.profile ? "" : "selected"}>Automaticky: ${esc(label(c.detected))}</option>
           ${clients.options.map((o) => `<option value="${esc(o.id)}" ${c.profile === o.id ? "selected" : ""}>${esc(o.label)}</option>`).join("")}
@@ -547,6 +547,14 @@ function clientsCard() {
       </div>`).join("")}</div>
     <div class="error" id="clients-error"></div>
     <div class="actions"><button onclick="loadClients()">Obnovit</button></div>`;
+}
+
+// Name set on the TV, with its maker unless the name already says it: "Obývák (Samsung Electronics)".
+function clientTitle(c) {
+  const name = c.name || c.maker || c.ip;
+  const brand = (c.maker || "").split(" ")[0].toLowerCase();
+  const maker = c.name && brand && !c.name.toLowerCase().includes(brand) ? ` <span class="muted">(${esc(c.maker)})</span>` : "";
+  return `<b>${esc(name)}${maker}</b>`;
 }
 
 function clientsRender() {

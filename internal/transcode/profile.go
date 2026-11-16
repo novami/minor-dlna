@@ -160,6 +160,8 @@ func normalizeContainer(formatName string) string {
 type Client struct {
 	IP       string    `json:"ip"`
 	Name     string    `json:"name"`
+	Maker    string    `json:"maker"` // UPnP manufacturer and modelName, sent by every renderer
+	Model    string    `json:"model"`
 	Ident    string    `json:"ident"`
 	Detected string    `json:"detected"`
 	Profile  string    `json:"profile"` // manual choice, "" = automatic
@@ -215,6 +217,20 @@ func (r *Resolver) Observe(ip, name, ident string) {
 	if ident = strings.TrimSpace(ident); ident != "" && !strings.Contains(c.Ident, ident) && len(c.Ident) < 1024 {
 		c.Ident = strings.TrimSpace(c.Ident + " | " + ident)
 		c.Ident = strings.TrimPrefix(c.Ident, "| ")
+	}
+}
+
+// ObserveDevice records a renderer found on the network with its UPnP description.
+func (r *Resolver) ObserveDevice(ip, name, maker, model string) {
+	maker, model = strings.TrimSpace(maker), strings.TrimSpace(model)
+	r.Observe(ip, name, maker+" "+model)
+	if r == nil || ip == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if c := r.clients[ip]; c != nil {
+		c.Maker, c.Model = strings.TrimRight(maker, " .,"), model
 	}
 }
 

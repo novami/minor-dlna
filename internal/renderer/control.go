@@ -140,7 +140,7 @@ func (c *Controller) Search(ctx context.Context) ([]Device, error) {
 	for _, d := range found {
 		d.MAC = lookupMAC(ctx, d.IP)
 		online[d.UDN] = d
-		c.Profiles.Observe(d.IP, d.Name, d.Manufacturer+" "+d.Model)
+		c.Profiles.ObserveDevice(d.IP, d.Name, d.Manufacturer, d.Model)
 		_, err := c.DB.ExecContext(ctx, `INSERT INTO renderer (udn, name, location, ip, mac, seen_at) VALUES (?, ?, ?, ?, ?, ?)
 			ON CONFLICT (udn) DO UPDATE SET name = excluded.name, location = excluded.location, ip = excluded.ip,
 				mac = CASE WHEN excluded.mac = '' THEN renderer.mac ELSE excluded.mac END, seen_at = excluded.seen_at`,
