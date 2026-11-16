@@ -126,6 +126,10 @@ var migrations = []string{
 	// Libraries are re-created from the configuration on start.
 	`DELETE FROM library;
 	DELETE FROM meta WHERE key = 'update_id';`,
+
+	// Rebuild the index once more: sort keys now follow the Czech alphabet.
+	`DELETE FROM library;
+	DELETE FROM meta WHERE key = 'update_id';`,
 }
 
 // Open opens (and migrates) the database at path.

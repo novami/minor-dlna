@@ -52,6 +52,12 @@ func TestSortKey(t *testing.T) {
 	if !(SortKey("Ep 2") < SortKey("Ep 10")) {
 		t.Fatal("natural order broken")
 	}
+	order := []string{"Cyklus", "Černý telefon", "Dům", "Insidious", "Řeka", "Šakal", "Úkryt", "v zajetí", "Zoo", "Žena"}
+	for i := 1; i < len(order); i++ {
+		if !(SortKey(order[i-1]) < SortKey(order[i])) {
+			t.Fatalf("%q should sort before %q", order[i-1], order[i])
+		}
+	}
 }
 
 func TestMatchSubtitle(t *testing.T) {

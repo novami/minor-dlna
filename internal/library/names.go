@@ -5,6 +5,9 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"unicode"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 var (
@@ -121,25 +124,32 @@ func atoi(s string) int {
 	return n
 }
 
-// SortKey makes plain string ordering natural: lower-case, numbers zero-padded, leading articles kept.
+// SortKey makes plain string ordering natural and Czech-alphabetical: lower-case, numbers zero-padded,
+// accents ignored except č, ř, š, ž, which sort after their base letter.
 func SortKey(s string) string {
-	s = strings.ToLower(s)
+	r := []rune(norm.NFD.String(strings.ToLower(s)))
 	var b strings.Builder
-	for i := 0; i < len(s); {
-		if s[i] >= '0' && s[i] <= '9' {
+	for i := 0; i < len(r); {
+		c := r[i]
+		switch {
+		case c >= '0' && c <= '9':
 			j := i
-			for j < len(s) && s[j] >= '0' && s[j] <= '9' {
+			for j < len(r) && r[j] >= '0' && r[j] <= '9' {
 				j++
 			}
-			num := strings.TrimLeft(s[i:j], "0")
+			num := strings.TrimLeft(string(r[i:j]), "0")
 			if len(num) < 8 {
 				b.WriteString(strings.Repeat("0", 8-len(num)))
 			}
 			b.WriteString(num)
 			i = j
 			continue
+		case c == '\u030C' && i > 0 && strings.ContainsRune("crsz", r[i-1]):
+			b.WriteByte('~') // caron: after every other letter of the base
+		case unicode.Is(unicode.Mn, c):
+		default:
+			b.WriteRune(c)
 		}
-		b.WriteByte(s[i])
 		i++
 	}
 	return b.String()
