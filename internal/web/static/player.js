@@ -33,7 +33,7 @@ function mediaStream(el) {
         this.onopen?.(info, r.start);
         el.src = r.url;
       }
-      await el.play().catch(() => {}); // autoplay may be refused; the play button stays available
+      await el.play().catch((e) => { if (e.name === "NotAllowedError") this.onblocked?.(); });
     },
     abs() { return st.offset + (el.currentTime || 0); },
     duration() { return st.info?.duration_ms ? st.info.duration_ms / 1000 : (isFinite(el.duration) ? el.duration : 0); },
@@ -76,13 +76,17 @@ window.webPlay = async (fromMs) => {
   tvCloseSheet();
   if (it.kind === "audio") return musicPlay([it], 0);
   musicPause();
+  // Safari allows sound only for a play() inside the click; the stream URL comes later, so unlock the element now.
+  videoBox();
+  vp.box.classList.add("loading");
+  vp.video.play().catch(() => {});
   try {
     const info = await playInfo(it.id);
     videoOpen(info, (fromMs > 0 ? Math.max(fromMs - 5000, 0) : 0) / 1000);
-  } catch (e) { alert(e.message); }
+  } catch (e) { videoClose(); alert(e.message); }
 };
 
-function videoOpen(info, at) {
+function videoBox() {
   if (!vp) {
     const box = document.createElement("div");
     box.className = "player";
@@ -106,7 +110,12 @@ function videoOpen(info, at) {
     document.addEventListener("keydown", videoKey);
     window.addEventListener("pagehide", videoSaveNow);
   }
+}
+
+function videoOpen(info, at) {
+  videoBox();
   vp.ms.onopen = videoSubs; // subtitles of a restarted stream are shifted to its new start
+  vp.ms.onblocked = () => { vp.box.classList.remove("loading"); videoBar(); videoWake(); videoMsg("Spusťte přehrávání tlačítkem ▶."); };
   vp.box.querySelector(".p-top b").textContent = info.title;
   vp.video.controls = info.direct; // native controls seek well in direct files
   vp.box.classList.toggle("direct", info.direct);
@@ -274,6 +283,7 @@ window.musicPlay = async (queue, i) => {
     music.el.addEventListener("error", () => { if (music.el.getAttribute("src") && !music.ms.recover()) musicGo(1); });
   }
   music.queue = queue; music.i = i;
+  if (!music.el.getAttribute("src")) music.el.play().catch(() => {}); // unlock inside the click, see webPlay
   await musicLoad();
 };
 
