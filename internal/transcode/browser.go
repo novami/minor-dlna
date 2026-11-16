@@ -202,24 +202,40 @@ func (h *HLS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := filepath.Join(sess.dir, name)
-	if name == "index.m3u8" {
-		// The first segment takes a moment; Safari gives up on an empty or missing playlist.
-		for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); {
-			if b, err := os.ReadFile(path); err == nil && strings.Contains(string(b), "#EXTINF") {
-				break
-			}
-			select {
-			case <-r.Context().Done():
-				return
-			case <-time.After(200 * time.Millisecond):
-			}
-		}
-		w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
-		w.Header().Set("Cache-Control", "no-cache")
-	} else {
+	if name != "index.m3u8" {
 		w.Header().Set("Content-Type", "video/mp4")
+		http.ServeFile(w, r, path)
+		return
 	}
-	http.ServeFile(w, r, path)
+	// The first segment takes a moment; Safari gives up on an empty or missing playlist.
+	var b []byte
+	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); {
+		var err error
+		if b, err = os.ReadFile(path); err == nil && strings.Contains(string(b), "#EXTINF") {
+			break
+		}
+		select {
+		case <-r.Context().Done():
+			return
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+	if b == nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = w.Write(startAtBeginning(b))
+}
+
+// startAtBeginning: a growing EVENT playlist would otherwise start playing near its live end, skipping the film's start.
+func startAtBeginning(b []byte) []byte {
+	head, rest, ok := strings.Cut(string(b), "\n")
+	if !ok || strings.Contains(rest, "#EXT-X-START") {
+		return b
+	}
+	return []byte(head + "\n#EXT-X-START:TIME-OFFSET=0,PRECISE=YES\n" + rest)
 }
 
 // ErrBusy reports that all transcoding slots are in use.

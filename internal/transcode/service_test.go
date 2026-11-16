@@ -78,3 +78,14 @@ func TestServe(t *testing.T) {
 		t.Fatalf("videotoolbox args: %s", a)
 	}
 }
+
+func TestStartAtBeginning(t *testing.T) {
+	in := "#EXTM3U\n#EXT-X-VERSION:7\n#EXTINF:4.0,\ns00000.m4s\n"
+	got := string(startAtBeginning([]byte(in)))
+	if !strings.HasPrefix(got, "#EXTM3U\n#EXT-X-START:TIME-OFFSET=0,PRECISE=YES\n#EXT-X-VERSION:7\n") {
+		t.Fatalf("missing start tag:\n%s", got)
+	}
+	if again := string(startAtBeginning([]byte(got))); again != got {
+		t.Fatalf("tag added twice:\n%s", again)
+	}
+}
