@@ -48,7 +48,7 @@ func (m *Manager) State() State {
 		status = "idle"
 	}
 	return State{Current: m.Current, Latest: m.latest, LastCheck: m.lastCheck, Status: status, Error: m.errMsg,
-		Installable: m.AppPath != "" && IsVersion(m.Current)}
+		Installable: m.installable()}
 }
 
 // Check asks GitHub for a newer release.
@@ -78,7 +78,7 @@ func (m *Manager) Install(ctx context.Context) error {
 	if rel == nil {
 		return ErrNoUpdate
 	}
-	if m.AppPath == "" || !IsVersion(m.Current) {
+	if !m.installable() {
 		return ErrNotInstalled
 	}
 	m.setStatus("installing", "")
@@ -96,6 +96,12 @@ func (m *Manager) Install(ctx context.Context) error {
 	return nil
 }
 
+// installable: running from an .app bundle whose version derives from a release tag.
+func (m *Manager) installable() bool {
+	_, ok := Base(m.Current)
+	return m.AppPath != "" && ok
+}
+
 func (m *Manager) setStatus(status, msg string) {
 	m.mu.Lock()
 	m.status, m.errMsg = status, msg
@@ -104,7 +110,7 @@ func (m *Manager) setStatus(status, msg string) {
 
 // Run checks daily and installs automatically when enabled and nothing is playing.
 func (m *Manager) Run(ctx context.Context) {
-	if m.AppPath == "" || !IsVersion(m.Current) {
+	if !m.installable() {
 		return // development build: manual checks only show what is available
 	}
 	timer := time.NewTimer(firstCheck)

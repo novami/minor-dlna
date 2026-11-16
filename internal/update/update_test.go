@@ -35,6 +35,14 @@ func TestCompare(t *testing.T) {
 		!IsVersion("v0.1.0") || !IsVersion("v0.2.0-rc.1") {
 		t.Error("IsVersion")
 	}
+	for in, want := range map[string]string{"v0.1.1-9-g22cac2e": "v0.1.1", "v0.1.0-dirty": "v0.1.0", "v0.2.0-rc.1-3-gabc-dirty": "v0.2.0-rc.1", "v0.2.0": "v0.2.0"} {
+		if got, ok := Base(in); !ok || got != want {
+			t.Errorf("Base(%s) = %s", in, got)
+		}
+	}
+	if _, ok := Base("b3b5f11-dirty"); ok {
+		t.Error("Base of a build without tag")
+	}
 }
 
 // fakeRelease builds a zipped app whose binary prints its version, plus signed checksums.
@@ -100,6 +108,12 @@ func TestInstall(t *testing.T) {
 	c := &Client{HTTP: srv.Client(), API: srv.URL, PublicKey: key}
 	if _, err := c.Latest(ctx, "v1.1.0", false); err != ErrNoUpdate {
 		t.Fatalf("same version offered: %v", err)
+	}
+	if _, err := c.Latest(ctx, "v1.1.0-4-gabc123", false); err != ErrNoUpdate {
+		t.Fatalf("local build on the latest tag offered its own release: %v", err)
+	}
+	if rel, err := c.Latest(ctx, "v1.0.0-9-g22cac2e", false); err != nil || rel.Version != "v1.1.0" {
+		t.Fatalf("local build not updated: %+v %v", rel, err)
 	}
 	rel, err := c.Latest(ctx, "v1.0.0", false)
 	if err != nil || rel.Version != "v1.1.0" {

@@ -101,7 +101,8 @@ func (c *Client) Latest(ctx context.Context, current string, prerelease bool) (*
 			best = rel
 		}
 	}
-	if best == nil || !IsVersion(current) || Compare(best.Version, current) <= 0 {
+	base, ok := Base(current)
+	if best == nil || !ok || Compare(best.Version, base) <= 0 {
 		return nil, ErrNoUpdate
 	}
 	return best, nil
@@ -343,6 +344,17 @@ func extract(f *zip.File, target string, perm os.FileMode) error {
 	}
 	return out.Close()
 }
+
+// Base returns the release a build comes from: "v0.1.1-9-g22cac2e-dirty" from git describe is a
+// local build on top of v0.1.1, so any release newer than v0.1.1 replaces it.
+func Base(s string) (string, bool) {
+	if m := reDescribe.FindStringSubmatch(s); m != nil {
+		s = m[1]
+	}
+	return s, IsVersion(s)
+}
+
+var reDescribe = regexp.MustCompile(`^(v\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)(?:\.\d+)?)?)(?:-\d+-g[0-9a-f]+)?(?:-dirty)?$`)
 
 // IsVersion reports whether s looks like v1.2.3 or v1.2.3-rc.1.
 func IsVersion(s string) bool {
