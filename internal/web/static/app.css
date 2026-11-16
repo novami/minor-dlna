@@ -152,7 +152,6 @@ a.button { display: inline-block; text-decoration: none; font-weight: 600; borde
 .meta-text b, .meta-text > small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .meta-text small { color: var(--muted); font-size: 12px; font-weight: 400; }
 .meta-text .warn { color: var(--danger); }
-.meta-text b .muted { color: var(--muted); font-weight: 400; }
 .meta-row select { width: 220px; flex: none; }
 .meta-edit { padding: 10px 4px 4px; }
 .meta-search { display: flex; gap: 8px; margin-bottom: 8px; }
