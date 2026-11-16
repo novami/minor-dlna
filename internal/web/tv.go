@@ -3,6 +3,9 @@ package web
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/novami/minor-dlna/internal/renderer"
+	"github.com/novami/minor-dlna/internal/transcode"
 )
 
 func (s *Server) registerTV(mux *http.ServeMux) {
@@ -67,6 +70,23 @@ func (s *Server) tvState(w http.ResponseWriter, r *http.Request) {
 		writeError(w, err.Error())
 		return
 	}
+	// Maker and model come from the same place as in Settings, so both lists show a TV alike.
+	byIP := map[string]transcode.Client{}
+	if s.Profiles != nil {
+		for _, c := range s.Profiles.Clients() {
+			byIP[c.IP] = c
+		}
+	}
+	type tvRow struct {
+		renderer.Device
+		Maker string `json:"maker"`
+		Model string `json:"model"`
+	}
+	rows := make([]tvRow, 0, len(devs))
+	for _, d := range devs {
+		c := byIP[d.IP]
+		rows = append(rows, tvRow{Device: d, Maker: c.Maker, Model: c.Model})
+	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, map[string]any{"devices": devs, "session": s.TV.Status()})
+	writeJSON(w, map[string]any{"devices": rows, "session": s.TV.Status()})
 }

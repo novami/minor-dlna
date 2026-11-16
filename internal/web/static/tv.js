@@ -54,15 +54,17 @@ window.tvWake = async (i) => {
 // ---------- overview card ----------
 
 function tvCard() {
+  // Same layout as the TV list in Settings.
   const rows = tv.devices.map((d, i) => `
-    <div class="usage-row tv-row">
-      <span><b>${esc(d.name)}</b><small>${esc(d.ip)}${d.mac ? "" : " · MAC neznámá"}</small></span>
-      <span>${d.online ? `<small class="on">zapnutá</small>` : d.mac
-        ? `<button class="link" onclick="tvWake(${i})">Zapnout</button>` : `<small>nedostupná</small>`}</span>
+    <div class="meta-row">
+      <div class="ph">📺</div>
+      <div class="meta-text"><b>${esc(d.name || d.maker || d.ip)}</b>${d.name && d.maker ? `<small>${esc(d.maker)}</small>` : ""}${d.model ? `<small>${esc(d.model)}</small>` : ""}<small>${esc(d.ip)}${d.mac ? "" : " · MAC neznámá"}</small></div>
+      ${d.online ? `<small class="on">zapnutá</small>` : d.mac
+        ? `<button class="link" onclick="tvWake(${i})">Zapnout</button>` : `<small>nedostupná</small>`}
     </div>`).join("");
   return `<h2>Televize</h2>
     <p class="hint">Filmy a hudbu z knihovny pustíte na televizi tlačítkem <b>Přehrát na TV</b>. Televize musí mít zapnuté sdílení obsahu (DLNA); pro zapínání přes síť povolte <b>Zapnout přes Wi-Fi/LAN</b>.</p>
-    ${tv.devices.length ? `<div class="usage">${rows}</div>` : `<p class="hint">${tv.searching ? "Hledám…" : "Zatím žádná televize."}</p>`}
+    ${tv.devices.length ? `<div class="meta-list">${rows}</div>` : `<p class="hint">${tv.searching ? "Hledám…" : "Zatím žádná televize."}</p>`}
     <div class="actions"><button onclick="tvSearch()" ${tv.searching ? "disabled" : ""}>${tv.searching ? "Hledám…" : "Hledat televize"}</button></div>`;
 }
 

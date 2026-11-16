@@ -163,9 +163,7 @@ a.button { display: inline-block; text-decoration: none; font-weight: 600; borde
 .tile .seen { position: absolute; top: 6px; right: 6px; width: 22px; height: 22px; border-radius: 50%; background: var(--ok); color: #fff; font-size: 13px; display: grid; place-items: center; }
 .tile .pbar { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: rgba(0,0,0,.35); }
 .tile .pbar i { display: block; height: 100%; background: var(--accent); }
-.tv-row span { display: flex; flex-direction: column; }
-.tv-row span:last-child { align-items: flex-end; justify-content: center; }
-.tv-row .on { color: var(--ok); }
+.meta-row .on { color: var(--ok); }
 .sheet-bg { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: grid; place-items: center; z-index: 20; padding: 16px; }
 .sheet { position: relative; background: var(--card); border-radius: var(--radius); box-shadow: var(--shadow); padding: 22px 24px; width: min(520px, 100%); max-height: 90vh; overflow: auto; }
 .sheet .close { position: absolute; top: 10px; right: 10px; }
