@@ -101,7 +101,7 @@ internal/version/            verze vložená při buildu (-ldflags)
 
 - SSDP M-SEARCH na `urn:schemas-upnp-org:device:MediaRenderer:1`, seznam TV ve web UI (LG je MediaRenderer, pokud má zapnuté *Sdílení obrazovky / DLNA*).
 - `SetAVTransportURI` (URL streamu + DIDL metadata) → `Play`; ovládání `Pause`, `Seek` (`REL_TIME`), `Stop`, `SetVolume`/`SetMute` (RenderingControl).
-- Stav: GENA `LastChange` + polling `GetPositionInfo`/`GetTransportInfo` každé 2 s → **přesná pozice** do play state, „pokračovat od 1:12:30“ = `Seek` po startu.
+- Stav: GENA `LastChange` + polling `GetPositionInfo`/`GetTransportInfo` každé 2 s → **přesná pozice** do play state, „pokračovat od 1:12:30“ = `Seek` po startu na uloženou pozici − 5 s. Vypnutí TV (renderer přestane odpovídat) = platí poslední zjištěná pozice.
 - Fronta: další epizoda seriálu automaticky (`SetNextAVTransportURI`, pokud ji TV podporuje; jinak po `STOPPED`).
 - Zapnutí TV: Wake-on-LAN (volitelně, MAC adresa TV v nastavení); LG musí mít povolené *Zapnout přes Wi-Fi/LAN*.
 
@@ -159,7 +159,7 @@ Správa: jeden ffmpeg proces na stream, ukončení při odpojení (context cance
 - **Web přehrávač:** pozice posílaná každých 10 s → přesná.
 - **Přehrát na TV:** pozice z `GetPositionInfo` → přesná.
 - **Spuštěno z TV přes DLNA:** odhad z Range/TimeSeekRange požadavků (poslední servírovaný offset ÷ bitrate); zhlédnuto při > 90 %.
-- „Pokračovat“ v TV menu jen jako seznam; skok na pozici z TV menu DLNA neumožňuje – plně funguje přes web / Přehrát na TV.
+- „Pokračovat“ v TV menu jen jako seznam; skok na pozici z TV menu DLNA neumožňuje – plně funguje přes web / Přehrát na TV. Ve fázi 7 ověřit na LG, zda nerespektuje záložku pozice v DIDL (`upnp:lastPlaybackPosition`).
 
 ## 8. Webové UI
 
