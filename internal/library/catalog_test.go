@@ -108,6 +108,14 @@ func TestCatalogScanAndViews(t *testing.T) {
 		t.Fatalf("resolve: %+v %v", item, err)
 	}
 
+	// A second scan keeps items in nested folders (parents must not be pruned).
+	if st, err := sc.ScanLibrary(ctx, cat.Libraries()[1]); err != nil || st.changed() {
+		t.Fatalf("rescan changed something: %+v %v", st, err)
+	}
+	if eps, _, _ := cat.Children(ctx, seasons[0].ID, 0, 0); len(eps) != 2 {
+		t.Fatalf("episodes lost on rescan: %d", len(eps))
+	}
+
 	// Removal is picked up and empty folders disappear.
 	os.RemoveAll(filepath.Join(movies, "Sub"))
 	if !sc.needsScan(cat.Libraries()[0]) {

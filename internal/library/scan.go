@@ -354,7 +354,19 @@ func (s *Scanner) reconcile(ctx context.Context, lib *Library, files []found) (s
 	ensureDir = func(root int, rel string) (int64, error) {
 		key := dirKey{root, rel}
 		if id, ok := dirs[key]; ok {
-			usedDirs[id] = true
+			if !usedDirs[id] {
+				usedDirs[id] = true
+				// Ancestors must stay too: deleting an unused parent cascades to this folder and its items.
+				if rel != "" {
+					pr := filepath.Dir(rel)
+					if pr == "." {
+						pr = ""
+					}
+					if _, err := ensureDir(root, pr); err != nil {
+						return 0, err
+					}
+				}
+			}
 			return id, nil
 		}
 		var parent sql.NullInt64
