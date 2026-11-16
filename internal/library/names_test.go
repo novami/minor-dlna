@@ -1,6 +1,13 @@
 package library
 
-import "testing"
+import (
+	"context"
+	"testing"
+	"time"
+
+	"github.com/novami/minor-dlna/internal/config"
+	"golang.org/x/text/unicode/norm"
+)
 
 func TestParseEpisode(t *testing.T) {
 	cases := []struct {
@@ -57,5 +64,13 @@ func TestMatchSubtitle(t *testing.T) {
 	}
 	if got := matchSubtitle("/m/Other.mkv", srts); got != "" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestDescribeNFC(t *testing.T) {
+	nfd := "Filmy/Pel\u0131\u0301s\u030cky (1999).mkv" // decomposed diacritics as macOS stores names
+	d := describe(context.Background(), config.Movies, "/x", nfd, time.Time{})
+	if !norm.NFC.IsNormalString(d.title) || d.year != 1999 {
+		t.Fatalf("got %q %d", d.title, d.year)
 	}
 }

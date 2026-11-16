@@ -120,6 +120,11 @@ var migrations = []string{
 	ALTER TABLE item ADD COLUMN audio_channels INTEGER;
 	ALTER TABLE item ADD COLUMN subtitle TEXT;
 	UPDATE item SET probed = 0 WHERE kind IN (1, 3);`,
+
+	// Rebuild the index once: names are now stored composed (NFC) and earlier rescans could drop nested folders.
+	// Libraries are re-created from the configuration on start.
+	`DELETE FROM library;
+	DELETE FROM meta WHERE key = 'update_id';`,
 }
 
 // Open opens (and migrates) the database at path.

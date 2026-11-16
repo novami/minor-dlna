@@ -15,6 +15,7 @@ import (
 	"github.com/novami/minor-dlna/internal/config"
 	"github.com/novami/minor-dlna/internal/dlna"
 	"github.com/novami/minor-dlna/internal/media"
+	"golang.org/x/text/unicode/norm"
 )
 
 const (
@@ -370,7 +371,7 @@ func (s *Scanner) reconcile(ctx context.Context, lib *Library, files []found) (s
 			return id, nil
 		}
 		var parent sql.NullInt64
-		name := filepath.Base(lib.Paths[root])
+		name := norm.NFC.String(filepath.Base(lib.Paths[root]))
 		if rel != "" {
 			pr := filepath.Dir(rel)
 			if pr == "." {
@@ -381,7 +382,7 @@ func (s *Scanner) reconcile(ctx context.Context, lib *Library, files []found) (s
 				return 0, err
 			}
 			parent = sql.NullInt64{Int64: pid, Valid: true}
-			name = filepath.Base(rel)
+			name = norm.NFC.String(filepath.Base(rel))
 		}
 		var id int64
 		err := tx.QueryRowContext(ctx, `INSERT INTO dir (library_id, root, rel, parent_id, name, sort_name) VALUES (?, ?, ?, ?, ?, ?) RETURNING id`,
@@ -552,6 +553,8 @@ type described struct {
 }
 
 func describe(ctx context.Context, lt config.LibraryType, path, rel string, mtime time.Time) described {
+	// File names from macOS are decomposed (NFD); TVs render composed text (NFC) more reliably.
+	rel = norm.NFC.String(rel)
 	name := filepath.Base(rel)
 	switch lt {
 	case config.Movies:
