@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
 	"strconv"
 
 	_ "modernc.org/sqlite"
@@ -135,7 +136,7 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	s := &Store{DB: db}
-	if err := s.migrate(); err != nil {
+	if err := s.migrate(path); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
@@ -144,10 +145,18 @@ func Open(path string) (*Store, error) {
 
 func (s *Store) Close() error { return s.DB.Close() }
 
-func (s *Store) migrate() error {
+func (s *Store) migrate(path string) error {
 	var v int
 	if err := s.DB.QueryRow(`PRAGMA user_version`).Scan(&v); err != nil {
 		return err
+	}
+	// Keep a copy of an existing index before changing its schema.
+	if v > 0 && v < len(migrations) {
+		backup := path + ".bak"
+		_ = os.Remove(backup)
+		if _, err := s.DB.Exec(`VACUUM INTO ?`, backup); err != nil {
+			return fmt.Errorf("backup before migration: %w", err)
+		}
 	}
 	for i := v; i < len(migrations); i++ {
 		tx, err := s.DB.Begin()

@@ -103,3 +103,76 @@ func TestSaveConfig(t *testing.T) {
 		t.Fatal("restart not triggered")
 	}
 }
+
+func remoteGet(t *testing.T, url string, cookie *http.Cookie) int {
+	t.Helper()
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Host = "192.168.1.7:8200" // looks like another device
+	if cookie != nil {
+		req.AddCookie(cookie)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	return resp.StatusCode
+}
+
+func remotePost(t *testing.T, url, body string) *http.Response {
+	t.Helper()
+	req, _ := http.NewRequest("POST", url, strings.NewReader(body))
+	req.Host = "192.168.1.7:8200"
+	req.Header.Set("X-MinorDLNA", "1")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	return resp
+}
+
+func TestRemoteLogin(t *testing.T) {
+	s, ts, _ := newServer(t)
+	if code := remoteGet(t, ts.URL+"/api/state", nil); code != http.StatusForbidden {
+		t.Fatalf("remote disabled: %d", code)
+	}
+	resp, body := post(t, ts.URL+"/api/config", `{"name":"TV","remote":true,"password":"kratke"}`, true)
+	if resp.StatusCode != 400 || !strings.Contains(body, "8 znaků") {
+		t.Fatalf("short password accepted: %s", body)
+	}
+	if resp, body := post(t, ts.URL+"/api/config", `{"name":"TV","remote":true,"password":"tajneheslo"}`, true); resp.StatusCode != 200 {
+		t.Fatalf("enable remote: %s", body)
+	}
+	saved, _ := config.Load(s.CfgPath)
+	s.Cfg = saved // the real server restarts with the saved config
+	if code := remoteGet(t, ts.URL+"/api/state", nil); code != http.StatusUnauthorized {
+		t.Fatalf("without session: %d", code)
+	}
+	if code := remoteGet(t, ts.URL+"/", nil); code != 200 {
+		t.Fatalf("login page not reachable: %d", code)
+	}
+	if r := remotePost(t, ts.URL+"/api/login", `{"password":"spatne"}`); r.StatusCode != 400 {
+		t.Fatalf("wrong password: %d", r.StatusCode)
+	}
+	r := remotePost(t, ts.URL+"/api/login", `{"password":"tajneheslo"}`)
+	var cookie *http.Cookie
+	for _, c := range r.Cookies() {
+		if c.Name == sessionCookie {
+			cookie = c
+		}
+	}
+	if r.StatusCode != 200 || cookie == nil || !cookie.HttpOnly || cookie.SameSite != http.SameSiteStrictMode {
+		t.Fatalf("login: %d %+v", r.StatusCode, cookie)
+	}
+	if code := remoteGet(t, ts.URL+"/api/state", cookie); code != 200 {
+		t.Fatalf("with session: %d", code)
+	}
+	// Brute force: locked after repeated failures, even with the right password.
+	for range maxFailures {
+		remotePost(t, ts.URL+"/api/login", `{"password":"spatne"}`)
+	}
+	if r := remotePost(t, ts.URL+"/api/login", `{"password":"tajneheslo"}`); r.StatusCode != 400 {
+		t.Fatalf("not locked out: %d", r.StatusCode)
+	}
+}

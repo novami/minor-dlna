@@ -4,11 +4,17 @@ const TYPES = [
   ["movies", "Filmy"], ["shows", "Seriály"], ["videos", "Videa"], ["photos", "Fotky"], ["music", "Hudba"],
 ];
 const $app = document.getElementById("app");
-let state = null;   // server state
-let draft = null;   // edited settings
-let step = 0;       // wizard step
+let state = null;      // server state
+let draft = null;      // edited settings
+let step = 0;          // wizard step
+let tab = sessionStorageGet("tab") || "home";
+let upd = null;        // update state
+let browse = { trail: [{ id: "0", title: "Knihovny" }], data: null };
 
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+function sessionStorageGet(k) { try { return sessionStorage.getItem(k); } catch (_) { return null; } }
+function sessionStorageSet(k, v) { try { sessionStorage.setItem(k, v); } catch (_) { /* private mode */ } }
+
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 // Shortens only the current user's home to "~"; other users' folders keep their full path.
 const short = (p) => {
   p = p || "";
@@ -16,6 +22,9 @@ const short = (p) => {
   if (home && (p === home || p.startsWith(home + "/"))) return "~" + p.slice(home.length);
   return p;
 };
+const typeName = (t) => TYPES.find(([v]) => v === t)?.[1] || t;
+
+class LoginRequired extends Error {}
 
 async function api(path, body) {
   const opts = body === undefined ? {} : {
@@ -25,20 +34,30 @@ async function api(path, body) {
   };
   const res = await fetch(path, opts);
   const data = await res.json().catch(() => ({}));
+  if (res.status === 401) throw new LoginRequired();
   if (!res.ok) throw new Error(data.error || "Požadavek selhal.");
   return data;
 }
 
 async function load() {
-  state = await api("/api/state");
+  try {
+    state = await api("/api/state");
+  } catch (e) {
+    if (e instanceof LoginRequired) return renderLogin();
+    throw e;
+  }
   draft = {
     name: state.setup_needed && state.name === "MinorDLNA" ? `MinorDLNA (${state.computer_name})` : state.name,
     libraries: state.libraries.map((l) => ({ name: l.name, type: l.type, paths: [...l.paths] })),
     dts: state.setup_needed ? null : state.dts,
     hwaccel: state.hwaccel,
     autostart: state.setup_needed ? true : state.autostart,
+    auto_update: state.auto_update,
+    remote: state.remote,
+    password: "",
   };
   render();
+  if (!state.setup_needed) loadUpdate();
 }
 
 function header() {
@@ -51,8 +70,38 @@ function header() {
 
 function render() {
   header();
-  $app.innerHTML = state.setup_needed ? wizard() : dashboard();
+  if (state.setup_needed) { $app.innerHTML = wizard(); return; }
+  const tabs = [["home", "Přehled"], ["library", "Knihovna"], ["settings", "Nastavení"]];
+  $app.innerHTML = `<nav class="tabs">${tabs.map(([k, t]) =>
+    `<button class="${k === tab ? "active" : ""}" onclick="setTab('${k}')">${t}</button>`).join("")}</nav>
+    <div id="tab">${tab === "home" ? home() : tab === "library" ? libraryView() : settings()}</div>`;
+  if (tab === "library" && !browse.data) openFolder(browse.trail[browse.trail.length - 1].id);
 }
+
+window.setTab = (t) => { tab = t; sessionStorageSet("tab", t); render(); };
+
+// ---------- login (other devices) ----------
+
+function renderLogin() {
+  document.getElementById("subtitle").textContent = "Přihlášení";
+  document.getElementById("status").hidden = true;
+  $app.innerHTML = `<section class="card narrow">
+    <h2>Správa serveru</h2>
+    <p class="hint">Zadejte heslo nastavené na Macu se serverem.</p>
+    <form onsubmit="login(event)">
+      <input type="password" id="pw" placeholder="Heslo" autocomplete="current-password" autofocus>
+      <div class="error" id="error"></div>
+      <div class="actions"><button class="primary" type="submit">Přihlásit</button></div>
+    </form></section>`;
+}
+
+window.login = async (ev) => {
+  ev.preventDefault();
+  try {
+    await api("/api/login", { password: document.getElementById("pw").value });
+    await load();
+  } catch (e) { showError(e.message); }
+};
 
 // ---------- shared editors ----------
 
@@ -67,10 +116,10 @@ function guessType(path) {
 
 function libsEditor() {
   const used = new Set(draft.libraries.flatMap((l) => l.paths));
-  const chips = (state.suggestions || []).filter((s) => !used.has(s.paths[0]));
+  const chips = state.is_local ? (state.suggestions || []).filter((s) => !used.has(s.paths[0])) : [];
   return `
-    ${chips.length ? `<div class="chips">${chips.map((s, i) =>
-      `<button class="chip" onclick="addSuggestion(${i})">+ ${esc(s.name)} <span class="addr">${esc(short(s.paths[0]))}</span></button>`).join("")}</div>` : ""}
+    ${chips.length ? `<div class="chips">${chips.map((s) =>
+      `<button class="chip" onclick="addSuggestion('${esc(s.paths[0])}')">+ ${esc(s.name)} <span class="addr">${esc(short(s.paths[0]))}</span></button>`).join("")}</div>` : ""}
     ${draft.libraries.map((l, i) => `
       <div class="lib">
         <div class="row">
@@ -87,7 +136,7 @@ function libsEditor() {
         <button class="link" onclick="addPath(${i})">+ Další složka do této knihovny</button>
       </div>`).join("")}
     <button onclick="addLibrary()">+ Přidat složku</button>
-    <span class="addr" style="margin-left:8px">Otevře se okno pro výběr složky na tomto Macu.</span>`;
+    <span class="addr" style="margin-left:8px">${state.is_local ? "Otevře se okno pro výběr složky na tomto Macu." : "Zadáte cestu ke složce na Macu se serverem."}</span>`;
 }
 
 function dtsChoice() {
@@ -99,14 +148,18 @@ function dtsChoice() {
   </div>`;
 }
 
-function autostartSwitch() {
+function toggle(key, title, sub) {
   return `<div class="switch">
-    <div><b>Spouštět po přihlášení</b><small>Server poběží na pozadí, TV ho najde i bez otevírání aplikace.</small></div>
-    <label class="toggle"><input type="checkbox" ${draft.autostart ? "checked" : ""} onchange="draft.autostart=this.checked"><span></span></label>
+    <div><b>${title}</b><small>${sub}</small></div>
+    <label class="toggle"><input type="checkbox" ${draft[key] ? "checked" : ""} onchange="draft['${key}']=this.checked;${key === "remote" ? "render()" : ""}"><span></span></label>
   </div>`;
 }
 
 async function pick() {
+  if (!state.is_local) {
+    const p = prompt("Cesta ke složce na Macu se serverem (např. /Users/jmeno/Movies):");
+    return p ? p.trim() : null;
+  }
   try {
     const r = await api("/api/pick-folder", {});
     return r.path || null;
@@ -116,12 +169,13 @@ async function pick() {
 window.addLibrary = async () => {
   const p = await pick();
   if (!p) return;
-  const base = p.split("/").pop() || p;
+  const base = (p.split("/").filter(Boolean).pop() || p).normalize("NFC");
   draft.libraries.push({ name: uniqueName(base), type: guessType(p), paths: [p] });
   render();
 };
-window.addSuggestion = (i) => {
-  const s = state.suggestions.filter((s) => !draft.libraries.some((l) => l.paths.includes(s.paths[0])))[i];
+window.addSuggestion = (path) => {
+  const s = state.suggestions.find((s) => s.paths[0] === path);
+  if (!s) return;
   draft.libraries.push({ name: uniqueName(s.name), type: s.type, paths: [...s.paths] });
   render();
 };
@@ -140,7 +194,7 @@ function uniqueName(name) {
 
 function showError(msg) {
   const el = document.getElementById("error");
-  if (el) el.textContent = msg; else alert(msg);
+  if (el) el.textContent = msg; else if (msg) alert(msg);
 }
 
 async function save(btn) {
@@ -149,27 +203,35 @@ async function save(btn) {
   btn.disabled = true;
   try {
     await api("/api/config", { ...draft });
-    await waitForRestart();
+    await waitForRestart("Restartuji server…");
   } catch (e) {
     showError(e.message);
     btn.disabled = false;
   }
 }
+window.save = save;
 
-async function waitForRestart() {
+async function waitForRestart(text, wantVersion) {
   const overlay = document.getElementById("overlay");
+  document.getElementById("overlay-text").textContent = text;
   overlay.hidden = false;
-  await new Promise((r) => setTimeout(r, 1200));
-  for (let i = 0; i < 40; i++) {
+  await new Promise((r) => setTimeout(r, 1500));
+  for (let i = 0; i < 120; i++) {
     try {
-      const res = await fetch("/api/ping", { cache: "no-store" });
-      if (res.ok) break;
-    } catch (_) { /* restarting */ }
-    await new Promise((r) => setTimeout(r, 500));
+      const s = await api("/api/state");
+      if (!wantVersion || s.version === wantVersion) break;
+    } catch (e) { if (e instanceof LoginRequired) break; }
+    await new Promise((r) => setTimeout(r, 1000));
   }
   overlay.hidden = true;
   step = 0;
+  browse.data = null;
   await load();
+}
+
+function ffmpegNotice() {
+  return `<div class="notice">Pro převod formátů, které televize neumí, a pro náhledy videí nainstalujte ffmpeg:
+    <code>brew install ffmpeg</code> a server restartujte.</div>`;
 }
 
 // ---------- wizard ----------
@@ -196,7 +258,8 @@ function wizard() {
       <p class="hint">Umí vaše televize přehrát zvuk DTS? U LG záleží na modelu a roce.</p>
       ${dtsChoice()}
       <div style="height:12px"></div>
-      ${autostartSwitch()}
+      ${toggle("autostart", "Spouštět po přihlášení", "Server poběží na pozadí, TV ho najde i bez otevírání aplikace.")}
+      ${toggle("auto_update", "Automatické aktualizace", "Nové verze se nainstalují samy, nikdy během přehrávání.")}
       ${state.ffmpeg ? "" : ffmpegNotice()}
       <div class="error" id="error"></div>
       <div class="actions"><button class="left link" onclick="go(1)">Zpět</button>
@@ -206,29 +269,170 @@ function wizard() {
 
 window.go = (s) => { step = s; render(); };
 
-function ffmpegNotice() {
-  return `<div class="notice">Pro převod formátů, které televize neumí, a pro náhledy videí nainstalujte ffmpeg:
-    <code>brew install ffmpeg</code> a server restartujte.</div>`;
+// ---------- home ----------
+
+function stats() {
+  return state.libraries.map((l) => `
+    <div class="stat"><b>${l.count.toLocaleString("cs-CZ")}</b><span>${l.name.normalize("NFC") === typeName(l.type) ? esc(l.name) : `${esc(l.name)} · ${typeName(l.type)}`}</span></div>`).join("");
 }
 
-// ---------- dashboard ----------
-
-function statLabel(l) {
-  const type = TYPES.find(([v]) => v === l.type)?.[1] || l.type;
-  return l.name === type ? esc(l.name) : `${esc(l.name)} · ${type}`;
-}
-
-function dashboard() {
-  const libs = state.libraries.map((l) => `
-    <div class="stat"><b>${l.count.toLocaleString("cs-CZ")}</b><span>${statLabel(l)}</span></div>`).join("");
+function home() {
   return `
     <section class="card">
       <h2>Knihovny</h2>
       <p class="hint">Změny ve složkách se projeví do minuty. Na televizi otevřete <b>Média</b> nebo <b>Připojená zařízení</b>.</p>
-      <div class="stats">${libs}</div>
+      <div class="stats">${stats()}</div>
       ${state.ffmpeg ? "" : ffmpegNotice()}
       <div class="actions"><button onclick="rescan(this)">Prohledat znovu</button></div>
     </section>
+    <section class="card" id="updates">${updatesCard()}</section>
+    <div class="foot">
+      <span>Verze ${esc(state.version)} · ${state.addresses.map((a) => `<span class="addr">${esc(a)}</span>`).join(" ")}</span>
+      <span>${state.is_local ? "" : `<button class="link" onclick="logout()">Odhlásit</button>`}
+      <button class="danger" onclick="quitServer()">Ukončit server</button></span>
+    </div>`;
+}
+
+function updatesCard() {
+  const u = upd;
+  if (!u) return `<h2>Aktualizace</h2><p class="hint">Načítám…</p>`;
+  const when = u.last_check && !u.last_check.startsWith("0001") ? new Date(u.last_check).toLocaleString("cs-CZ") : "zatím ne";
+  let body;
+  if (u.status === "installing") body = `<p class="hint">Instaluji novou verzi…</p>`;
+  else if (u.latest) body = `
+      <p class="hint">K dispozici je verze <b>${esc(u.latest.version)}</b>.</p>
+      ${u.latest.notes ? `<pre class="notes">${esc(u.latest.notes)}</pre>` : ""}
+      <div class="actions">${u.installable
+        ? `<button class="primary" onclick="installUpdate('${esc(u.latest.version)}')">Nainstalovat a restartovat</button>`
+        : `<a class="button" href="${esc(u.latest.url)}" target="_blank" rel="noopener">Stáhnout z GitHubu</a>`}</div>`;
+  else body = `<p class="hint">${u.installable ? "Máte nejnovější verzi." : "Vývojová verze – automatické aktualizace jsou vypnuté."} Poslední kontrola: ${esc(when)}.</p>`;
+  return `<h2>Aktualizace</h2>${body}
+    ${u.error ? `<div class="error">${esc(u.error)}</div>` : ""}
+    ${u.latest || u.status === "installing" ? "" : `<div class="actions"><button onclick="checkUpdate(this)">Zkontrolovat aktualizace</button></div>`}`;
+}
+
+async function loadUpdate() {
+  try { upd = await api("/api/update"); } catch (_) { return; }
+  const el = document.getElementById("updates");
+  if (el) el.innerHTML = updatesCard();
+}
+
+window.checkUpdate = async (btn) => {
+  btn.disabled = true;
+  btn.textContent = "Kontroluji…";
+  try { upd = await api("/api/update/check", {}); } catch (e) { showError(e.message); }
+  const el = document.getElementById("updates");
+  if (el) el.innerHTML = updatesCard();
+};
+
+window.installUpdate = async (version) => {
+  if (!confirm(`Nainstalovat verzi ${version}? Server se na chvíli restartuje.`)) return;
+  await api("/api/update/install", {}).catch((e) => alert(e.message));
+  await waitForRestart(`Instaluji verzi ${version}…`, version);
+};
+
+window.rescan = async (btn) => {
+  btn.disabled = true;
+  await api("/api/rescan", {}).catch((e) => showError(e.message));
+  setTimeout(load, 800);
+};
+window.quitServer = async () => {
+  if (!confirm("Ukončit server? Televize přestane vidět vaše média, dokud aplikaci znovu nespustíte.")) return;
+  await api("/api/quit", {}).catch(() => {});
+  $app.innerHTML = `<section class="card"><h2>Server je ukončen</h2><p class="hint">Znovu ho spustíte z Finderu nebo Spotlightu (MinorDLNA).</p></section>`;
+  document.getElementById("status").hidden = true;
+};
+window.logout = async () => { await api("/api/logout", {}).catch(() => {}); renderLogin(); };
+
+// ---------- library ----------
+
+function libraryView() {
+  const d = browse.data;
+  const crumbs = browse.trail.map((c, i) => i === browse.trail.length - 1
+    ? `<span>${esc(c.title)}</span>`
+    : `<button class="link" onclick="crumb(${i})">${esc(c.title)}</button>`).join(`<span class="sep">›</span>`);
+  if (!d) return `<div class="crumbs">${crumbs}</div><p class="hint">Načítám…</p>`;
+  if (!d.items.length) return `<div class="crumbs">${crumbs}</div><section class="card"><p class="hint">Tady zatím nic není.</p></section>`;
+  return `<div class="crumbs">${crumbs}</div>
+    <div class="grid ${d.items.every((i) => i.kind === "photo") ? "photos" : ""}">${d.items.map(card).join("")}</div>
+    ${d.items.length < d.total ? `<div class="actions"><button onclick="more(this)">Načíst další (${d.total - d.items.length})</button></div>` : ""}`;
+}
+
+function card(it, i) {
+  const icon = it.dir ? "📁" : it.kind === "audio" ? "♪" : it.kind === "photo" ? "🖼" : "▶";
+  const art = it.art ? `<img loading="lazy" src="${esc(it.art)}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'ph',textContent:'${icon}'}))">` : `<div class="ph">${icon}</div>`;
+  const sub = it.dir ? (it.count >= 0 ? `${it.count} položek` : "") : (it.info || "");
+  return `<button class="tile" onclick="openItem(${i})" title="${esc(it.title)}">
+    <div class="art">${art}</div>
+    <div class="meta"><b>${esc(it.title)}</b>${sub ? `<small>${esc(sub)}</small>` : ""}</div>
+  </button>`;
+}
+
+async function openFolder(id) {
+  try {
+    browse.data = await api("/api/browse?id=" + encodeURIComponent(id));
+  } catch (e) {
+    if (e instanceof LoginRequired) return renderLogin();
+    browse.data = { items: [], total: 0 };
+  }
+  if (tab === "library") document.getElementById("tab").innerHTML = libraryView();
+}
+
+window.openItem = (i) => {
+  const it = browse.data.items[i];
+  if (it.dir) {
+    browse.trail.push({ id: it.id, title: it.title });
+    browse.data = null;
+    document.getElementById("tab").innerHTML = libraryView();
+    openFolder(it.id);
+  } else if (it.kind === "photo" && it.large) {
+    lightbox(i);
+  }
+};
+
+window.crumb = (i) => {
+  browse.trail = browse.trail.slice(0, i + 1);
+  browse.data = null;
+  document.getElementById("tab").innerHTML = libraryView();
+  openFolder(browse.trail[i].id);
+};
+
+window.more = async (btn) => {
+  btn.disabled = true;
+  const id = browse.trail[browse.trail.length - 1].id;
+  const next = await api(`/api/browse?id=${encodeURIComponent(id)}&start=${browse.data.items.length}`);
+  browse.data.items.push(...next.items);
+  document.getElementById("tab").innerHTML = libraryView();
+};
+
+function lightbox(i) {
+  const photos = browse.data.items.map((it, idx) => ({ it, idx })).filter((p) => p.it.kind === "photo");
+  let pos = photos.findIndex((p) => p.idx === i);
+  const box = document.createElement("div");
+  box.className = "lightbox";
+  const show = () => {
+    const it = photos[pos].it;
+    box.innerHTML = `<img src="${esc(it.large)}" alt=""><div class="cap">${esc(it.title)}</div>
+      <button class="nav prev">‹</button><button class="nav next">›</button><button class="close">×</button>`;
+  };
+  const close = () => { box.remove(); document.removeEventListener("keydown", key); };
+  const move = (d) => { pos = (pos + d + photos.length) % photos.length; show(); };
+  const key = (e) => { if (e.key === "Escape") close(); if (e.key === "ArrowRight") move(1); if (e.key === "ArrowLeft") move(-1); };
+  box.addEventListener("click", (e) => {
+    if (e.target.classList.contains("prev")) move(-1);
+    else if (e.target.classList.contains("next")) move(1);
+    else if (e.target.tagName !== "IMG") close();
+  });
+  document.addEventListener("keydown", key);
+  show();
+  document.body.appendChild(box);
+}
+
+// ---------- settings ----------
+
+function settings() {
+  const remoteHint = state.addresses.length ? `Správa pak půjde otevřít z telefonu nebo jiného počítače: ${state.addresses.map((a) => `<span class="addr">${esc(a)}</span>`).join(", ")}` : "";
+  return `
     <section class="card">
       <h2>Nastavení</h2>
       <label class="field">Název serveru v televizi</label>
@@ -243,43 +447,29 @@ function dashboard() {
         <option value="none" ${draft.hwaccel === "none" ? "selected" : ""}>Softwarový (vyšší kvalita, pomalejší)</option>
       </select>
       <div style="height:8px"></div>
-      ${autostartSwitch()}
+      ${toggle("autostart", "Spouštět po přihlášení", "Server poběží na pozadí, TV ho najde i bez otevírání aplikace.")}
+      ${toggle("auto_update", "Automatické aktualizace", "Nové verze se nainstalují samy, nikdy během přehrávání.")}
+      ${toggle("remote", "Přístup z jiných zařízení", "Správa chráněná heslem. " + remoteHint)}
+      ${draft.remote ? `<label class="field">${state.remote ? "Nové heslo (prázdné = ponechat)" : "Heslo (aspoň 8 znaků)"}</label>
+        <input type="password" autocomplete="new-password" value="${esc(draft.password)}" oninput="draft.password=this.value">` : ""}
       <div class="error" id="error"></div>
       <div class="actions"><button class="primary" onclick="save(this)">Uložit</button></div>
-    </section>
-    <div class="foot">
-      <span>Verze ${esc(state.version)} · ${state.addresses.map((a) => `<span class="addr">${esc(a)}</span>`).join(" ")}</span>
-      <button class="danger" onclick="quitServer()">Ukončit server</button>
-    </div>`;
+    </section>`;
 }
-
-window.save = save;
-window.rescan = async (btn) => {
-  btn.disabled = true;
-  await api("/api/rescan", {}).catch((e) => showError(e.message));
-  setTimeout(load, 800);
-};
-window.quitServer = async () => {
-  if (!confirm("Ukončit server? Televize přestane vidět vaše média, dokud aplikaci znovu nespustíte.")) return;
-  await api("/api/quit", {}).catch(() => {});
-  $app.innerHTML = `<section class="card"><h2>Server je ukončen</h2><p class="hint">Znovu ho spustíte z Finderu nebo Spotlightu (MinorDLNA).</p></section>`;
-  document.getElementById("status").hidden = true;
-};
 
 // Refresh counts while scanning, without touching unsaved edits.
 setInterval(async () => {
-  if (!state || state.setup_needed || document.getElementById("overlay").hidden === false) return;
+  if (!state || state.setup_needed || tab !== "home" || document.getElementById("overlay").hidden === false) return;
   try {
     const s = await api("/api/state");
     const changed = s.scanning !== state.scanning || JSON.stringify(s.libraries.map((l) => l.count)) !== JSON.stringify(state.libraries.map((l) => l.count));
     state = s;
     if (changed) {
       header();
-      const stats = document.querySelector(".stats");
-      if (stats) stats.innerHTML = s.libraries.map((l) => `
-        <div class="stat"><b>${l.count.toLocaleString("cs-CZ")}</b><span>${statLabel(l)}</span></div>`).join("");
+      const el = document.querySelector(".stats");
+      if (el) el.innerHTML = stats();
     }
-  } catch (_) { /* server restarting */ }
+  } catch (_) { /* restarting or logged out */ }
 }, 3000);
 
 load().catch((e) => { $app.innerHTML = `<section class="card"><h2>Chyba</h2><p class="hint">${esc(e.message)}</p></section>`; });

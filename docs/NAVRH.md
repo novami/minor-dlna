@@ -200,22 +200,23 @@ updates:
 - **Průvodce:** název serveru (předvyplněn název Macu), knihovny – návrhy `~/Movies`, `~/Pictures`, `~/Music` jedním klikem nebo nativní výběr složky (`osascript choose folder`), typ odhadnutý z cesty; DTS (výchozí „nevím“ = převádět); spouštění po přihlášení.
 - **Spouštění po přihlášení:** LaunchAgent `~/Library/LaunchAgents/cz.minordlna.plist` s `-background`, `KeepAlive` jen po pádu (běžné ukončení zůstane ukončené). Aktualizace v budoucnu nahradí celý `.app` bundle.
 - **Logy:** `~/Library/Logs/MinorDLNA/minordlna.log` (při spuštění mimo terminál), rotace nad 10 MB.
-- **Bezpečnost správy:** jen z loopbacku, Host musí být loopback (ochrana proti DNS rebinding), změny jen s hlavičkou `X-MinorDLNA` (ochrana proti CSRF). Přístup z jiných zařízení s heslem – fáze 5.
+- **Bezpečnost správy:** z tohoto Macu bez hesla (loopback klient + loopback Host = ochrana proti DNS rebinding); z jiných zařízení jen po zapnutí „Přístup z jiných zařízení“ a přihlášení heslem (bcrypt, session cookie HttpOnly + SameSite=Strict, 30 dní, zámek na minutu po 5 chybných pokusech). Změny vždy jen s hlavičkou `X-MinorDLNA` (ochrana proti CSRF). Výběr složky oknem macOS jen lokálně, vzdáleně se cesta zadá ručně.
+- **Webové rozhraní:** záložky Přehled (počty, aktualizace, adresy, ukončení), Knihovna (stejný strom jako v TV, mřížka s náhledy 640 px, prohlížeč fotek), Nastavení.
 - Proti uspání Macu: během aktivního streamu běží subproces `caffeinate -i -w <pid>`; navíc doporučit *Probudit pro přístup k síti*.
 - ffmpeg z Homebrew (`brew install ffmpeg`), nedistribuuje se s binárkou.
 - Build: `GOOS=darwin GOARCH=arm64|amd64`, volitelně universal binárka přes `lipo`.
 ### Aktualizace z GitHubu
 
-- **Zdroj:** `GET https://api.github.com/repos/novami/minor-dlna/releases/latest` (u kanálu `prerelease` seznam releasů). Bez tokenu – limit 60 req/h na IP stačí; odpověď cachovat s `ETag`.
-- **Verze:** SemVer tagy `vX.Y.Z`, porovnání s verzí vloženou při buildu; vývojový build (`dev`) se neaktualizuje.
-- **Režim auto (výchozí):** kontrola po startu a každých 24 h; nová verze se stáhne a nainstaluje, **až neběží žádný stream** (jinak odloží). Web UI ukáže poznámky k vydání a výsledek.
-- **Režim ručně:** v *Nastavení → Aktualizace* tlačítko *Zkontrolovat aktualizace* → zobrazí dostupnou verzi a changelog → *Nainstalovat*. Přepínač *Automatické aktualizace* tamtéž.
-- **Assety releasu:** `minordlna_X.Y.Z_darwin_arm64.tar.gz`, `…_darwin_amd64.tar.gz`, `checksums.txt`, `checksums.txt.sig`.
-- **Ověření:** SHA-256 z `checksums.txt` + podpis `checksums.txt` klíčem Ed25519, jehož veřejná část je vložená v binárce (soukromý klíč jen v GitHub Actions secrets). Bez platného podpisu se nic neinstaluje – chrání před podvrženým releasem nebo kompromitovaným účtem bez přístupu ke klíči.
-- **Instalace:** stažení do dočasného souboru vedle binárky → ověření → `codesign` ad-hoc se stejným identifierem → atomický `rename` přes původní binárku (stará zůstane jako `minordlna.prev`) → ukončení procesu, launchd (`KeepAlive`) spustí novou verzi.
-- **Rollback:** nová verze po startu zapíše „zdravý start“; pokud do 60 s spadne, další spuštění vrátí `minordlna.prev`.
-- **Migrace DB** jen dopředné a idempotentní; před migrací záloha `library.db`.
-- **Release pipeline:** GitHub Actions na tag `v*` – testy, build obou architektur s `-ldflags "-X …/version.Version=…"`, `checksums.txt`, podpis, upload k releasu, poznámky z commitů.
+- **Zdroj:** `GET https://api.github.com/repos/novami/minor-dlna/releases` (bez tokenu, obecný User-Agent), vybere nejvyšší SemVer verzi; pre-release jen při `updates.channel: prerelease`.
+- **Verze:** tagy `vX.Y.Z`; vývojový build (verze z `git describe`) se automaticky neaktualizuje, ruční kontrola jen ukáže, co je k dispozici.
+- **Režim auto (výchozí, `updates.auto`):** první kontrola minutu po startu, pak každých 24 h; instaluje se, **až nic nehraje** (přímé ani převáděné streamy), jinak opakuje za 10 min.
+- **Režim ručně:** *Přehled → Aktualizace → Zkontrolovat aktualizace* → verze a poznámky k vydání → *Nainstalovat a restartovat*. Přepínač *Automatické aktualizace* je v Nastavení i v průvodci.
+- **Assety releasu:** `MinorDLNA-vX.Y.Z-macos.zip` (univerzální `.app`, zabalený `ditto --norsrc --noextattr`), `checksums.txt`, `checksums.txt.sig`.
+- **Ověření:** podpis `checksums.txt` klíčem Ed25519 (veřejná část v `internal/update`, soukromá jen v secretu `MINORDLNA_SIGNING_KEY`, lokálně `~/.config/minordlna/release-signing.key`) → SHA-256 zipu → rozbalení s ochranou proti zip-slip a symlinkům → nová binárka musí spustit `-version` a vrátit očekávanou verzi.
+- **Instalace:** nová aplikace se rozbalí vedle stávající, stávající se přejmenuje na `MinorDLNA.app.prev`, nová na její místo, proces se přes `exec` nahradí novou binárkou (stejný PID, launchd ani Finder nic nepoznají).
+- **Rollback:** soubor `update-pending` v data dir; když nová verze nenastartuje (chyba při startu), vrátí se `.prev` a spustí se. Po minutě úspěšného běhu se `.prev` maže. Tvrdý pád nové verze rollback nespustí – kontrola `-version` před výměnou tomu má předejít.
+- **Migrace DB** jen dopředné; před migrací existující databáze záloha `library.db.bak` (`VACUUM INTO`).
+- **Release pipeline:** `.github/workflows/release.yml` na tag `v*` – testy, build `.app`, zip, `checksums.txt`, podpis (`go run ./tools/release sign`), `gh release create` s automatickými poznámkami.
 
 - **Fotky z aplikace Fotky (Photos.app):** knihovnu `.photoslibrary` nečíst přímo (interní formát) – v MVP jen exportované složky; napojení na Photos je kandidát na v2.
 

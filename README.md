@@ -17,7 +17,14 @@ Sestaví `MinorDLNA.app` a zkopíruje ji do `~/Applications`. Pak ji spusťte z 
 - Správa: `http://localhost:8200/` – jen z tohoto Macu
 - macOS se při prvním spuštění zeptá na přístup k místní síti – bez povolení TV server neuvidí.
 
+- Aktualizace: automaticky z GitHub Releases (lze vypnout), nebo *Přehled → Zkontrolovat aktualizace*. Instalují se jen podepsané verze a nikdy během přehrávání.
+- Přístup ke správě z telefonu: *Nastavení → Přístup z jiných zařízení* (heslo).
+
 Pro vývoj: `make run` (server v terminálu, logy na stderr).
+
+## Vydání nové verze
+
+Tag `vX.Y.Z` spustí `.github/workflows/release.yml`: sestaví aplikaci, podepíše `checksums.txt` a vytvoří GitHub Release. Workflow potřebuje secret `MINORDLNA_SIGNING_KEY` (obsah souboru se soukromým klíčem z `go run ./tools/release keygen`).
 
 ## Licence
 

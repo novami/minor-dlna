@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"golang.org/x/text/unicode/norm"
 	"gopkg.in/yaml.v3"
 )
 
@@ -38,6 +39,7 @@ type Config struct {
 	Libraries  []Library `yaml:"libraries"`
 	Transcode  Transcode `yaml:"transcode"`
 	Updates    Updates   `yaml:"updates"`
+	Remote     Remote    `yaml:"remote"`
 
 	allow []netip.Prefix
 }
@@ -47,6 +49,12 @@ type Transcode struct {
 	HWAccel     string `yaml:"hwaccel"`      // videotoolbox | none
 	MaxSessions int    `yaml:"max_sessions"` // concurrent ffmpeg processes
 	DTS         *bool  `yaml:"dts"`          // TV decodes DTS (differs by LG model line)
+}
+
+// Remote enables the management page from other devices, protected by a password.
+type Remote struct {
+	Enabled      bool   `yaml:"enabled"`
+	PasswordHash string `yaml:"password_hash"` // bcrypt
 }
 
 type Updates struct {
@@ -154,7 +162,8 @@ func (c *Config) validate() error {
 	seen := map[string]bool{}
 	for i := range c.Libraries {
 		l := &c.Libraries[i]
-		l.Name = strings.TrimSpace(l.Name)
+		// macOS hands out folder names decomposed (NFD); store names composed so they compare and display normally.
+		l.Name = norm.NFC.String(strings.TrimSpace(l.Name))
 		if l.Name == "" {
 			return fmt.Errorf("library %d: name is empty", i+1)
 		}

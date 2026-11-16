@@ -18,9 +18,11 @@ import (
 	"time"
 
 	"github.com/novami/minor-dlna/internal/config"
+	"github.com/novami/minor-dlna/internal/dlna"
 	"github.com/novami/minor-dlna/internal/library"
 	"github.com/novami/minor-dlna/internal/macos"
 	"github.com/novami/minor-dlna/internal/update"
+	"golang.org/x/crypto/bcrypt"
 )
 
 //go:embed static
@@ -40,11 +42,16 @@ type Server struct {
 
 func (s *Server) Register(mux *http.ServeMux) {
 	static, _ := fs.Sub(staticFS, "static")
-	mux.Handle("GET /{$}", s.local(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("GET /{$}", s.public(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
 		http.ServeFileFS(w, r, static, "index.html")
 	})))
-	mux.Handle("GET /static/", s.local(http.StripPrefix("/static/", http.FileServerFS(static))))
+	mux.Handle("GET /static/", s.public(http.StripPrefix("/static/", http.FileServerFS(static))))
+	mux.Handle("POST /api/login", s.public(http.HandlerFunc(s.login)))
+	mux.Handle("POST /api/logout", s.public(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sessions.drop(w, r)
+		writeJSON(w, map[string]bool{"ok": true})
+	})))
 	mux.Handle("GET /api/ping", s.local(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Write([]byte("minordlna"))
 	})))
@@ -55,6 +62,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 		s.Scanner.Rescan()
 		writeJSON(w, map[string]bool{"ok": true})
 	})))
+	mux.Handle("GET /api/browse", s.local(http.HandlerFunc(s.browse)))
 	mux.Handle("GET /api/update", s.local(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, s.Updates.State())
 	})))
@@ -76,24 +84,55 @@ func (s *Server) Register(mux *http.ServeMux) {
 // local restricts management to this Mac and blocks cross-site requests:
 // the client must be loopback, the Host must be a loopback name (defeats DNS rebinding),
 // and state-changing requests need a custom header that browsers only send from our own page.
+//
+// Other devices get in only when remote access is enabled and they hold a session from /api/login.
+// The session cookie is SameSite=Strict and host-only, so a rebinding or foreign site never carries it.
 func (s *Server) local(next http.Handler) http.Handler {
+	return s.guard(next, false)
+}
+
+// public lets unauthenticated remote clients load the page shell, so it can show the login form.
+func (s *Server) public(next http.Handler) http.Handler {
+	return s.guard(next, true)
+}
+
+func (s *Server) guard(next http.Handler, public bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		host, _, _ := net.SplitHostPort(r.RemoteAddr)
-		ip := net.ParseIP(host)
-		reqHost := r.Host
-		if h, _, err := net.SplitHostPort(r.Host); err == nil {
-			reqHost = h
-		}
-		if ip == nil || !ip.IsLoopback() || (reqHost != "localhost" && reqHost != "127.0.0.1" && reqHost != "::1") {
-			http.Error(w, "Správa je dostupná jen na tomto Macu: http://localhost:"+portOf(r), http.StatusForbidden)
-			return
-		}
 		if r.Method != http.MethodGet && r.Header.Get("X-MinorDLNA") != "1" {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
-		next.ServeHTTP(w, r)
+		if isLocal(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		if !s.remoteEnabled() {
+			http.Error(w, "Správa je dostupná jen na Macu se serverem: http://localhost:"+portOf(r), http.StatusForbidden)
+			return
+		}
+		if public || sessions.valid(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusUnauthorized)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "login"})
 	})
+}
+
+// isLocal: loopback client and loopback Host header (defeats DNS rebinding).
+func isLocal(r *http.Request) bool {
+	host, _, _ := net.SplitHostPort(r.RemoteAddr)
+	ip := net.ParseIP(host)
+	reqHost := r.Host
+	if h, _, err := net.SplitHostPort(r.Host); err == nil {
+		reqHost = h
+	}
+	return ip != nil && ip.IsLoopback() && (reqHost == "localhost" || reqHost == "127.0.0.1" || reqHost == "::1")
+}
+
+func (s *Server) remoteEnabled() bool {
+	return s.Cfg.Remote.Enabled && s.Cfg.Remote.PasswordHash != ""
 }
 
 func portOf(r *http.Request) string {
@@ -121,6 +160,8 @@ type stateJSON struct {
 	Addresses    []string      `json:"addresses"`
 	Libraries    []libraryJSON `json:"libraries"`
 	DTS          bool          `json:"dts"`
+	IsLocal      bool          `json:"is_local"`
+	Remote       bool          `json:"remote"`
 	AutoUpdate   bool          `json:"auto_update"`
 	HWAccel      string        `json:"hwaccel"`
 	Suggestions  []libraryJSON `json:"suggestions"`
@@ -141,7 +182,7 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 		Version: s.Version, Name: s.Cfg.Name, ComputerName: macos.ComputerName(),
 		SetupNeeded: len(s.Cfg.Libraries) == 0, Autostart: macos.AutostartEnabled(),
 		FFmpeg: s.FFmpeg, Scanning: s.Scanner.Scanning(), Addresses: lanAddresses(s.Cfg.Port),
-		Libraries: libs, DTS: s.Cfg.Transcode.DTSEnabled(), AutoUpdate: s.Cfg.Updates.AutoEnabled(), HWAccel: s.Cfg.Transcode.HWAccel,
+		Libraries: libs, IsLocal: isLocal(r), Remote: s.remoteEnabled(), DTS: s.Cfg.Transcode.DTSEnabled(), AutoUpdate: s.Cfg.Updates.AutoEnabled(), HWAccel: s.Cfg.Transcode.HWAccel,
 		Suggestions: suggestions(), Home: homeDir(),
 	})
 }
@@ -176,6 +217,8 @@ type configRequest struct {
 	HWAccel    string `json:"hwaccel"`
 	Autostart  bool   `json:"autostart"`
 	AutoUpdate *bool  `json:"auto_update"`
+	Remote     *bool  `json:"remote"`
+	Password   string `json:"password"` // new password for remote access, empty = keep
 }
 
 func (s *Server) saveConfig(w http.ResponseWriter, r *http.Request) {
@@ -208,6 +251,25 @@ func (s *Server) saveConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	dts := req.DTS
 	next.Transcode.DTS = &dts
+	if req.Remote != nil {
+		next.Remote.Enabled = *req.Remote
+		if req.Password != "" {
+			if len([]rune(req.Password)) < 8 {
+				writeError(w, "Heslo musí mít aspoň 8 znaků.")
+				return
+			}
+			hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
+			if err != nil {
+				writeError(w, "Heslo se nepodařilo uložit.")
+				return
+			}
+			next.Remote.PasswordHash = string(hash)
+		}
+		if next.Remote.Enabled && next.Remote.PasswordHash == "" {
+			writeError(w, "Pro přístup z jiných zařízení nastavte heslo.")
+			return
+		}
+	}
 	if req.AutoUpdate != nil {
 		auto := *req.AutoUpdate
 		next.Updates.Auto = &auto
@@ -250,6 +312,10 @@ func czechConfigError(err error) string {
 }
 
 func (s *Server) pickFolder(w http.ResponseWriter, r *http.Request) {
+	if !isLocal(r) {
+		writeError(w, "Okno pro výběr složky se otevírá jen na Macu se serverem. Zadejte cestu ručně.")
+		return
+	}
 	path, err := macos.PickFolder(r.Context(), "Vyberte složku s médii pro MinorDLNA")
 	switch {
 	case errors.Is(err, macos.ErrCancelled):
@@ -310,4 +376,73 @@ func Ping(port int) bool {
 func homeDir() string {
 	h, _ := os.UserHomeDir()
 	return h
+}
+
+type browseItem struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
+	Dir   bool   `json:"dir"`
+	Count int    `json:"count"`
+	Kind  string `json:"kind,omitempty"`
+	Art   string `json:"art,omitempty"`   // card image
+	Large string `json:"large,omitempty"` // full-size photo
+	Info  string `json:"info,omitempty"`
+}
+
+// browse lists the same tree the TV sees, with thumbnails for the web library view.
+func (s *Server) browse(w http.ResponseWriter, r *http.Request) {
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		id = library.RootID
+	}
+	start, _ := strconv.Atoi(r.URL.Query().Get("start"))
+	count, _ := strconv.Atoi(r.URL.Query().Get("count"))
+	if count <= 0 || count > 500 {
+		count = 120
+	}
+	meta, err := s.Cat.Metadata(r.Context(), id)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	objs, total, err := s.Cat.Children(r.Context(), id, max(start, 0), count)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	items := make([]browseItem, 0, len(objs))
+	for _, o := range objs {
+		it := browseItem{ID: o.ID, Title: o.Title, Dir: o.IsDir, Count: o.ChildCount}
+		if o.ArtPath != "" {
+			// Cards are larger than DLNA thumbnails: use the 640 px rendition.
+			it.Art = strings.Replace(o.ArtPath, "/tn.jpg", "/sm.jpg", 1)
+		}
+		if !o.IsDir {
+			switch o.Format.Kind {
+			case dlna.Image:
+				it.Kind = "photo"
+				it.Large = strings.Replace(o.ArtPath, "/tn.jpg", "/lrg.jpg", 1)
+			case dlna.Audio:
+				it.Kind, it.Info = "audio", o.Artist
+			default:
+				it.Kind = "video"
+				if o.DurationMs > 0 {
+					it.Info = formatMinutes(o.DurationMs)
+				}
+				if o.Height > 0 {
+					it.Info = strings.TrimPrefix(it.Info+" · "+strconv.Itoa(o.Height)+"p", " · ")
+				}
+			}
+		}
+		items = append(items, it)
+	}
+	writeJSON(w, map[string]any{"id": meta.ID, "title": meta.Title, "parent": meta.ParentID, "total": total, "items": items})
+}
+
+func formatMinutes(ms int64) string {
+	m := ms / 60000
+	if m >= 60 {
+		return fmt.Sprintf("%d h %02d min", m/60, m%60)
+	}
+	return fmt.Sprintf("%d min", max(m, 1))
 }
