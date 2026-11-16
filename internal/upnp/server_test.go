@@ -120,3 +120,30 @@ func TestDIDLForLG(t *testing.T) {
 		t.Error("generic client should get the original")
 	}
 }
+
+func soapAction(t *testing.T, url, action, args string) string {
+	body := `<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>` +
+		`<u:` + action + ` xmlns:u="urn:schemas-upnp-org:service:ContentDirectory:1">` + args + `</u:` + action + `></s:Body></s:Envelope>`
+	req, _ := http.NewRequest("POST", url+"/cds/control", strings.NewReader(body))
+	req.Header.Set("SOAPAction", `"urn:schemas-upnp-org:service:ContentDirectory:1#`+action+`"`)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	return string(b)
+}
+
+func TestSamsungActions(t *testing.T) {
+	ts := setup(t)
+	if out := soapAction(t, ts.URL, "X_GetFeatureList", ""); !strings.Contains(out, "samsung.com_BASICVIEW") {
+		t.Errorf("feature list: %s", out)
+	}
+	if out := soapAction(t, ts.URL, "X_SetBookmark", "<ObjectID>I1</ObjectID><PosSecond>42</PosSecond>"); !strings.Contains(out, "X_SetBookmarkResponse") {
+		t.Errorf("bookmark: %s", out)
+	}
+	if out := soapAction(t, ts.URL, "X_SetBookmark", "<ObjectID>I999</ObjectID><PosSecond>42</PosSecond>"); !strings.Contains(out, "<errorCode>701</errorCode>") {
+		t.Errorf("bookmark of unknown item: %s", out)
+	}
+}

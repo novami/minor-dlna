@@ -2,7 +2,7 @@
 
 Mediální server v Go pro sdílení videí, fotek a hudby z Macu do TV (primárně LG webOS 2022+) přes DLNA/UPnP AV. Cíl: plnohodnotný domácí mediální server bez cloudu – TV používá vestavěný přehrávač (LG: *Média / Připojená zařízení*), k tomu webové rozhraní pro procházení, přehrávání v prohlížeči a spouštění přehrávání na TV.
 
-**Cílové prostředí:** server macOS (Apple Silicon i Intel), klient LG TV 2022 a novější (webOS 22+); ostatní DLNA klienti jako „generic“ profil.
+**Cílové prostředí:** server macOS (Apple Silicon i Intel), klienti televize LG (webOS 22+), Samsung (Tizen), Sony Bravia, Panasonic Viera, Hisense (VIDAA), Roku TV, Android TV / Google TV (TCL, Philips, Xiaomi…); ostatní televize bezpečným profilem, počítačové přehrávače jako „generic“.
 
 **Repozitář:** https://github.com/novami/minor-dlna (Go modul `github.com/novami/minor-dlna`), licence **MIT**.
 
@@ -119,10 +119,31 @@ internal/version/            verze vložená při buildu (-ldflags)
 - Kontejnery: MKV, MP4, MOV, TS, AVI, WebM.
 - Video: H.264, HEVC (10bit, HDR10, HLG, Dolby Vision profil 5/8 v MP4/MKV), VP9, AV1.
 - Audio: AAC, AC3, EAC3 (vč. Atmos), MP3, FLAC, PCM; DTS dle řady (přepínač `dts: true|false`, výchozí `true` pro 2023+).
-- Detekce: User-Agent `LGE`/`webOS`/`LG-` → profil LG, ostatní klienti „generic“ (vše direct). Ruční přiřazení profilu k IP přijde s web UI.
+- Detekce: viz *Profily značek* níže.
 - Plán (direct / kopie videa + převod zvuku / převod videa) se kóduje do URL streamu (`/transcode/<id>/copy-ac3.ts`), aby nezávisel na User-Agentu přehrávače, který stream stahuje; neznámé hodnoty se odmítají.
 - Zvuk: >2 kanály → AC3 640k 5.1, jinak AAC 192k. Video → H.264 (VideoToolbox, nebo libx264 při `hwaccel: none`), max. 1080p. VP9/AV1 se při nutném remuxu převádí (MPEG-TS je neunese). Hudba ALAC/APE/WMA → FLAC.
 - Seek u převáděných streamů jen časový (`TimeSeekRange.dlna.org`, `OP=10`); bajtové rozsahy se nenabízejí, protože velikost výstupu není známá. HDR → SDR tone mapping zatím není.
+
+**Profily značek** (`transcode/profile.go`, formáty dle specifikací výrobců pro modely ~2020+; DTS u všech přepínačem):
+
+| Profil | Poznávací znaky | Navíc / méně oproti základu* |
+|---|---|---|
+| `lg` | `LGE`, `webOS`, `LG-` | + VP9, AV1, VC-1, OGG, Vorbis, Opus |
+| `samsung` | `Samsung`, `SEC_HHP`, `Tizen` | + VP9, AV1, VC-1/WMV, ASF, WMA, Vorbis, Opus |
+| `sony` | `BRAVIA`, `Sony` (i v `X-AV-Client-Info`) | + VP9, OGG, Vorbis, Opus |
+| `panasonic` | `Panasonic`, `VIERA` | + VP9 |
+| `hisense` | `Hisense`, `VIDAA` | + VP9 |
+| `roku` | `Roku` (TCL/Hisense Roku TV) | + VP9; bez AVI, MPEG-PS, MPEG-4 Part 2 |
+| `android` | `Android`, `Google`, `TCL`, `Philips`, `Xiaomi`, `SHIELD`, `ExoPlayer` | + VP9, Vorbis, Opus; bez AVI, MPEG-4 Part 2 |
+| `tv` | ostatní TV (`Toshiba`, `Grundig`, `Sharp`, `Metz`, `Vestel`…, `DLNADOC`) | bez AVI, MPEG-4 Part 2 |
+| `generic` | ostatní (VLC, počítače) | vše bez převodu |
+
+\*Základ: MKV, MP4/MOV, TS, AVI, MPEG-PS; H.264 (8 bit), HEVC, MPEG-2, MPEG-4 Part 2; AAC, AC3, EAC3, MP3, MP2, FLAC, PCM.
+
+- Pořadí: Roku první (Roku TV nese i jméno výrobce), pak značky, pak platformy (Android) a obecná TV.
+- Identita klienta = vše známé o jeho IP: User-Agent a `X-AV-Client-Info` z požadavků na server + výrobce, model a název z popisu rendereru (UA přehrávače TV značku často neobsahuje).
+- Ruční volba profilu k IP v Nastavení → *Televize a přehrávače* (`transcode.clients` v YAML), platí hned bez restartu.
+- Samsung: `X_GetFeatureList` (výchozí pohled) a `X_SetBookmark` → přesná pozice i u přehrávání spuštěného z TV. Titulky: `sec:CaptionInfoEx` (Samsung, LG), `pv:subtitleFileUri` (Sony, Philips, část Android přehrávačů), `res` `text/srt` (ostatní).
 
 Správa: jeden ffmpeg proces na stream, ukončení při odpojení (context cancel), limit souběžných transkódů (výchozí 2, při plném limitu čeká 5 s – TV se často hned znovu připojuje), HLS segmenty v `cache/hls` (čtení max. 2× rychlostí), smazání při zastavení nebo po 2 min bez dotazu.
 
@@ -245,6 +266,7 @@ Klienti Wikidat/TMDb, DLNA vrstva i updater vlastní (několik endpointů, bez S
 6. **Metadata (Wikidata + volitelně TMDb):** párování, cache plakátů, ruční oprava, plakáty a české názvy v TV i webu.
 7. **Přehrát na TV:** discovery rendererů, AVTransport, ovladač, play state, další epizoda, WoL.
 8. **Webový přehrávač:** direct MP4 / HLS, pozice, titulky, hudební přehrávač.
+9. **Další značky TV:** profily Samsung, Sony, Panasonic, Hisense, Roku, Android TV, obecná TV; detekce z UA i popisu rendereru, ruční volba profilu, Samsung záložky.
 
 Každá fáze končí funkčním stavem testovaným na LG TV.
 
@@ -261,6 +283,7 @@ Každá fáze končí funkčním stavem testovaným na LG TV.
 - **Aplikační firewall macOS** může blokovat příchozí spojení – při instalaci návod / `socketfilterfw --add`.
 - **Uspání Macu** přeruší stream i viditelnost serveru.
 - **Více rozhraní (Wi-Fi + Ethernet + VPN):** chybná IP v `LOCATION` = TV server vidí, ale nepřehraje.
+- **Profily jiných značek než LG nejsou ověřené na skutečné TV** – formáty podle specifikací, ale firmware a přehrávače (hlavně Android TV aplikace) se liší; řešení je ruční volba profilu. Ruční volba je vázaná na IP – při změně adresy z DHCP se ztratí (doporučit pevnou IP v routeru).
 - **LG AVTransport quirky:** některé firmwary odmítají `SetAVTransportURI` bez přesného DIDL `protocolInfo`, nebo nehlásí `LastChange` – proto polling.
 - **Pozice u přehrávání spuštěného z TV** je jen odhad.
 - **Metadata:** posílají názvy filmů na Wikidata/TMDb (vypnutelné), chybné párování u obecných názvů, plakáty z Wikipedie jen u části filmů, závislost na dostupnosti API.

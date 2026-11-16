@@ -46,15 +46,6 @@ func TestKey(t *testing.T) {
 	}
 }
 
-func TestDetect(t *testing.T) {
-	if Detect("Linux/4.4.84 UPnP/1.0 LGE_DLNA_SDK/1.6.0 [TV][webOS 22]", true).Name != "lg-webos22" {
-		t.Error("LG not detected")
-	}
-	if Detect("VLC/3.0.20 LibVLC/3.0.20", true).Name != "generic" {
-		t.Error("generic expected")
-	}
-}
-
 func TestDecideBrowser(t *testing.T) {
 	for _, c := range []struct {
 		m    Media
@@ -72,5 +63,57 @@ func TestDecideBrowser(t *testing.T) {
 		if got := DecideBrowser(c.m, c.hevc); got != c.want {
 			t.Errorf("%+v hevc=%v: %+v, want %+v", c.m, c.hevc, got, c.want)
 		}
+	}
+}
+
+func TestDetectBrands(t *testing.T) {
+	cases := map[string]string{
+		"Linux/3.10 UPnP/1.0 LGE_DLNA_SDK/1.6.0 DLNADOC/1.50":              "lg",
+		"SEC_HHP_[TV] Samsung Q80 Series (55)/1.0 DLNADOC/1.50":            "samsung",
+		"X-AV-Client-Info: av=5.0; cn=\"Sony Corporation\"; mn=\"BRAVIA\"": "sony",
+		"Panasonic MIL DLNA CP UPnP/1.0 DLNADOC/1.50":                      "panasonic",
+		"Hisense HU55A6 VIDAA":                                             "hisense",
+		"Roku 55R635 TCL":                                                  "roku",
+		"TCL Smart TV Google TV":                                           "android",
+		"Dalvik/2.1.0 (Linux; U; Android 11; BRAVIA 4K VH2)":               "sony",
+		"Toshiba TV UPnP/1.0 DLNADOC/1.50":                                 "tv",
+		"VLC/3.0.20 LibVLC/3.0.20":                                         "generic",
+	}
+	for ident, want := range cases {
+		if got := DetectID(ident); got != want {
+			t.Errorf("%q: got %s, want %s", ident, got, want)
+		}
+	}
+}
+
+func TestResolver(t *testing.T) {
+	r := NewResolver(false, map[string]string{"10.0.0.9": "panasonic", "10.0.0.8": "bogus"})
+	// The browser User-Agent names no brand, the renderer description does.
+	r.Observe("10.0.0.5", "Obývák", "Samsung Electronics QE55Q80")
+	if p := r.For("10.0.0.5", "Linux UPnP/1.0"); p.Name != "samsung" {
+		t.Errorf("merged ident: got %s", p.Name)
+	}
+	if p := r.For("10.0.0.9", "LGE webOS"); p.Name != "panasonic" {
+		t.Errorf("override: got %s", p.Name)
+	}
+	if _, ok := r.Overrides()["10.0.0.8"]; ok {
+		t.Error("unknown profile kept")
+	}
+	if r.Set("10.0.0.5", "nope") || !r.Set("10.0.0.5", "generic") || r.For("10.0.0.5", "").Name != "generic" {
+		t.Error("set override")
+	}
+	samsung, _ := ByName("samsung", false)
+	if Decide(samsung, Media{Container: "matroska", VideoCodec: "hevc", AudioCodec: "dts", Channels: 6}) != (Plan{"copy", "ac3"}) {
+		t.Error("samsung without dts should convert audio")
+	}
+	android, _ := ByName("android", true)
+	if Decide(android, Media{Container: "avi", VideoCodec: "mpeg4", AudioCodec: "mp3", Channels: 2}) != (Plan{"h264", "copy"}) {
+		t.Error("android avi/mpeg4 should convert")
+	}
+}
+
+func TestOptionsCoverBrands(t *testing.T) {
+	if len(Options()) != len(brands)+1 {
+		t.Error("a brand is missing from the settings options")
 	}
 }

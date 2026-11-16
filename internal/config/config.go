@@ -50,7 +50,9 @@ type Transcode struct {
 	FFmpeg      string `yaml:"ffmpeg"`       // empty = PATH / Homebrew
 	HWAccel     string `yaml:"hwaccel"`      // videotoolbox | none
 	MaxSessions int    `yaml:"max_sessions"` // concurrent ffmpeg processes
-	DTS         *bool  `yaml:"dts"`          // TV decodes DTS (differs by LG model line)
+	DTS         *bool  `yaml:"dts"`          // TV decodes DTS (differs by model line)
+	// Clients assigns a playback profile to a device IP (lg, samsung, sony, panasonic, hisense, roku, android, tv, generic).
+	Clients map[string]string `yaml:"clients,omitempty"`
 }
 
 // Remote enables the management page from other devices, protected by a password.

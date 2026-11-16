@@ -62,7 +62,7 @@ async function load() {
     password: "",
   };
   render();
-  if (!state.setup_needed) { loadUpdate(); loadStorage(); loadMeta(); tvLoad(); }
+  if (!state.setup_needed) { loadUpdate(); loadStorage(); loadMeta(); tvLoad(); loadClients(); }
 }
 
 function header() {
@@ -264,7 +264,7 @@ function wizard() {
     </section>`;
   return `<section class="card">${bar}
       <h2>Poslední drobnosti</h2>
-      <p class="hint">Umí vaše televize přehrát zvuk DTS? U LG záleží na modelu a roce.</p>
+      <p class="hint">Umí vaše televize přehrát zvuk DTS? Záleží na značce, modelu a roce.</p>
       ${dtsChoice()}
       <div style="height:12px"></div>
       ${toggle("autostart", "Spouštět po přihlášení", "Server poběží na pozadí, TV ho najde i bez otevírání aplikace.")}
@@ -521,8 +521,54 @@ function settings() {
       <div class="error" id="error"></div>
       <div class="actions"><button class="primary" onclick="save(this)">Uložit</button></div>
     </section>
+    <section class="card" id="clients">${clientsCard()}</section>
     ${state.metadata ? `<section class="card" id="meta">${metaCard()}</section>` : ""}`;
 }
+
+// ---------- TVs and players ----------
+
+let clients = null; // { clients, options }
+
+function clientsCard() {
+  const head = `<h2>Televize a přehrávače</h2>
+    <p class="hint">Server pozná značku televize sám a posílá jí jen formáty, které umí – ostatní převede. Když se video na některém zařízení nepřehraje, vyberte mu profil ručně.</p>`;
+  if (!clients) return head + `<p class="hint">Načítám…</p>`;
+  if (!clients.clients.length) return head + `<p class="hint">Zatím se žádné zařízení nepřipojilo. Otevřete server na televizi a obnovte.</p>
+    <div class="actions"><button onclick="loadClients()">Obnovit</button></div>`;
+  const label = (id) => clients.options.find((o) => o.id === id)?.label || id;
+  return head + `<div class="meta-list">${clients.clients.map((c) => `
+      <div class="meta-row">
+        <div class="ph">📺</div>
+        <div class="meta-text"><b>${esc(c.name || c.ip)}</b><small title="${esc(c.ident)}">${c.name ? esc(c.ip) + " · " : ""}${esc(c.ident || "dosud nepřipojeno")}</small></div>
+        <select onchange="setClientProfile('${esc(c.ip)}', this.value)">
+          <option value="" ${c.profile ? "" : "selected"}>Automaticky: ${esc(label(c.detected))}</option>
+          ${clients.options.map((o) => `<option value="${esc(o.id)}" ${c.profile === o.id ? "selected" : ""}>${esc(o.label)}</option>`).join("")}
+        </select>
+      </div>`).join("")}</div>
+    <div class="error" id="clients-error"></div>
+    <div class="actions"><button onclick="loadClients()">Obnovit</button></div>`;
+}
+
+function clientsRender() {
+  const el = document.getElementById("clients");
+  if (el) el.innerHTML = clientsCard();
+}
+
+async function loadClients() {
+  try { clients = await api("/api/clients"); } catch (_) { return; }
+  clientsRender();
+}
+window.loadClients = loadClients;
+
+window.setClientProfile = async (ip, profile) => {
+  try {
+    await api("/api/clients/profile", { ip, profile });
+    await loadClients();
+  } catch (e) {
+    const el = document.getElementById("clients-error");
+    if (el) el.textContent = e.message;
+  }
+};
 
 function tmdbField() {
   if (draft.tmdb_token === "" && state.tmdb) {

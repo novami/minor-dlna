@@ -62,7 +62,7 @@ type Controller struct {
 	Cat        *library.Catalog
 	Port       int
 	Interfaces []string
-	DTS        bool
+	Profiles   *transcode.Resolver
 	Transcode  bool
 	OnProgress func() // an item finished or stopped with new progress (the TV's library view shows it)
 
@@ -140,6 +140,7 @@ func (c *Controller) Search(ctx context.Context) ([]Device, error) {
 	for _, d := range found {
 		d.MAC = lookupMAC(ctx, d.IP)
 		online[d.UDN] = d
+		c.Profiles.Observe(d.IP, d.Name, d.Manufacturer+" "+d.Model)
 		_, err := c.DB.ExecContext(ctx, `INSERT INTO renderer (udn, name, location, ip, mac, seen_at) VALUES (?, ?, ?, ?, ?, ?)
 			ON CONFLICT (udn) DO UPDATE SET name = excluded.name, location = excluded.location, ip = excluded.ip,
 				mac = CASE WHEN excluded.mac = '' THEN renderer.mac ELSE excluded.mac END, seen_at = excluded.seen_at`,
@@ -344,7 +345,7 @@ func (c *Controller) load(ctx context.Context, s *session) error {
 		return err
 	}
 	base := "http://" + net.JoinHostPort(ip, strconv.Itoa(c.Port))
-	opts := upnp.RenderOpts{Profile: transcode.Detect(s.dev.Manufacturer+" "+s.dev.Model, c.DTS), Transcode: c.Transcode}
+	opts := upnp.RenderOpts{Profile: c.Profiles.For(s.dev.IP, s.dev.Manufacturer+" "+s.dev.Model+" "+s.dev.Name), Transcode: c.Transcode}
 	s.uri, _ = upnp.StreamURL(s.item, base, opts)
 	meta := upnp.DIDL([]library.Object{s.item}, base, opts)
 	slog.Info("play to TV", "tv", s.dev.Name, "item", s.item.Title, "url", s.uri, "from_ms", s.resume)

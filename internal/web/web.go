@@ -43,6 +43,7 @@ type Server struct {
 	TV        *renderer.Controller
 	Transcode *transcode.Service
 	HLS       *transcode.HLS
+	Profiles  *transcode.Resolver
 	Restart   func() // apply a saved config
 	Quit      func()
 }
@@ -81,6 +82,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.Handle("GET /api/meta/search", s.local(http.HandlerFunc(s.metaSearch)))
 	mux.Handle("POST /api/meta/set", s.local(http.HandlerFunc(s.metaSet)))
 	s.registerTV(mux)
+	s.registerClients(mux)
 	s.registerPlayer(mux)
 	mux.Handle("GET /api/update", s.local(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, s.Updates.State())

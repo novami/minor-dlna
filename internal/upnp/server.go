@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -26,8 +27,8 @@ const (
 )
 
 type Server struct {
-	// DTS and CanTranscode feed the per-client playback decision.
-	DTS          bool
+	// Profiles and CanTranscode feed the per-client playback decision.
+	Profiles     *transcode.Resolver
 	CanTranscode bool
 
 	Name    string
@@ -89,7 +90,10 @@ func (s *Server) icon(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) renderOpts(r *http.Request) RenderOpts {
-	return RenderOpts{Profile: transcode.Detect(r.UserAgent(), s.DTS), Transcode: s.CanTranscode}
+	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+	// Older Sony TVs name themselves only in X-AV-Client-Info.
+	ident := strings.TrimSpace(r.UserAgent() + " " + r.Header.Get("X-AV-Client-Info"))
+	return RenderOpts{Profile: s.Profiles.For(ip, ident), Transcode: s.CanTranscode}
 }
 
 // NotifyChange tells subscribed clients that the library changed.
@@ -193,6 +197,10 @@ func (s *Server) cdsAction(r *http.Request, action string, in map[string]string)
 		return []arg{{"SortCaps", "dc:title"}}, nil
 	case "GetSystemUpdateID":
 		return []arg{{"Id", s.updateID()}}, nil
+	case "X_GetFeatureList": // Samsung asks where its basic view should start
+		return []arg{{"FeatureList", featureList}}, nil
+	case "X_SetBookmark": // Samsung reports where the viewer stopped
+		return s.setBookmark(r, in)
 	}
 	return nil, errInvalidAction
 }
@@ -232,6 +240,24 @@ func (s *Server) browse(r *http.Request, in map[string]string) ([]arg, error) {
 		{"TotalMatches", strconv.Itoa(total)},
 		{"UpdateID", s.updateID()},
 	}, nil
+}
+
+const featureList = `<?xml version="1.0" encoding="UTF-8"?><Features xmlns="urn:schemas-upnp-org:av:avs" ` +
+	`xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:schemas-upnp-org:av:avs http://www.upnp.org/schemas/av/avs.xsd">` +
+	`<Feature name="samsung.com_BASICVIEW" version="1">` +
+	`<container id="0" type="object.item.audioItem"/><container id="0" type="object.item.videoItem"/><container id="0" type="object.item.imageItem"/>` +
+	`</Feature></Features>`
+
+func (s *Server) setBookmark(r *http.Request, in map[string]string) ([]arg, error) {
+	sec, err := strconv.ParseInt(strings.TrimSpace(in["PosSecond"]), 10, 64)
+	id := in["ObjectID"]
+	if err != nil || sec < 0 || !strings.HasPrefix(id, "I") {
+		return nil, errInvalidArgs
+	}
+	if err := s.Cat.SavePosition(r.Context(), id, sec*1000, 0); err != nil {
+		return nil, errNoSuchObject
+	}
+	return nil, nil
 }
 
 func atoiDefault(s string) (int, error) {

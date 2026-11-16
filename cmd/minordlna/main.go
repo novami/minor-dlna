@@ -263,7 +263,8 @@ func run(parent context.Context, quit context.CancelFunc, cfgPath string, openBr
 	cat.VideoThumbs = ffmpeg != ""
 	th := thumbs.New(filepath.Join(filepath.Dir(cfgPath), "cache", "thumbs"), ffmpeg, cat)
 	dev := upnp.New(cfg.Name, cfg.UUID, version.Version, cat)
-	dev.DTS, dev.CanTranscode = cfg.Transcode.DTSEnabled(), ffmpeg != ""
+	profiles := transcode.NewResolver(cfg.Transcode.DTSEnabled(), cfg.Transcode.Clients)
+	dev.Profiles, dev.CanTranscode = profiles, ffmpeg != ""
 	tc := transcode.NewService(ffmpeg, cfg.Transcode.HWAccel, cfg.Transcode.MaxSessions, cat)
 	tc.Captions = stream.Captions
 	probe := ""
@@ -305,7 +306,7 @@ func run(parent context.Context, quit context.CancelFunc, cfgPath string, openBr
 	defer live.Store(nil)
 	tv := &renderer.Controller{
 		DB: st.DB, Cat: cat, Port: cfg.Port, Interfaces: cfg.Interfaces,
-		DTS: cfg.Transcode.DTSEnabled(), Transcode: ffmpeg != "",
+		Profiles: profiles, Transcode: ffmpeg != "",
 		OnProgress: func() {
 			if _, err := st.BumpUpdateID(ctx); err == nil {
 				dev.NotifyChange()
@@ -315,7 +316,7 @@ func run(parent context.Context, quit context.CancelFunc, cfgPath string, openBr
 	tvDone := make(chan struct{})
 	go func() { tv.Run(ctx); close(tvDone) }()
 	ui := &web.Server{
-		Cfg: cfg, CfgPath: cfgPath, Cat: cat, Scanner: scanner, Version: version.Version, FFmpeg: ffmpeg != "", Updates: upd, Meta: meta, TV: tv,
+		Cfg: cfg, CfgPath: cfgPath, Cat: cat, Scanner: scanner, Version: version.Version, FFmpeg: ffmpeg != "", Updates: upd, Meta: meta, TV: tv, Profiles: profiles,
 		Transcode: tc, HLS: transcode.NewHLS(tc, filepath.Join(filepath.Dir(cfgPath), "cache", "hls")),
 		Restart: func() { restart.Store(true); cancel() },
 		Quit:    quit,

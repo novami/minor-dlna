@@ -18,7 +18,8 @@ const didlHeader = `<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lit
 	`xmlns:dc="http://purl.org/dc/elements/1.1/" ` +
 	`xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" ` +
 	`xmlns:dlna="urn:schemas-dlna-org:metadata-1-0/" ` +
-	`xmlns:sec="http://www.sec.co.kr/">`
+	`xmlns:sec="http://www.sec.co.kr/" ` +
+	`xmlns:pv="http://www.pv.com/pvns/">`
 
 // RenderOpts tailor resources to the requesting client.
 type RenderOpts struct {
@@ -108,12 +109,17 @@ func writeItem(b *strings.Builder, o library.Object, baseURL string, opts Render
 	case o.Format.Kind == dlna.Image:
 		writePhotoRes(b, o, baseURL)
 	default:
+		// Sony, Philips and some Android players read subtitles from pv: attributes of the media resource.
+		attrs := ""
+		if subURL != "" {
+			attrs = ` pv:subtitleFileType="SRT" pv:subtitleFileUri="` + esc(subURL) + `"`
+		}
 		plan := playPlan(o, opts)
 		if plan.Direct() {
-			writeRes(b, dlna.ProtocolInfo(o.Format), o.Size, o.DurationMs, o.Width, o.Height, baseURL+o.MediaPath)
+			writeRes(b, dlna.ProtocolInfo(o.Format), o.Size, o.DurationMs, o.Width, o.Height, baseURL+o.MediaPath, attrs)
 		} else {
 			// Only the converted stream: offering the original too lets the TV pick a format it can't play.
-			writeRes(b, transcode.ProtocolInfo(plan), 0, o.DurationMs, o.Width, o.Height, baseURL+transcode.Path(o.ID, plan))
+			writeRes(b, transcode.ProtocolInfo(plan), 0, o.DurationMs, o.Width, o.Height, baseURL+transcode.Path(o.ID, plan), attrs)
 		}
 	}
 	if subURL != "" {
@@ -163,7 +169,7 @@ func writeDerived(b *strings.Builder, name string, id int64, baseURL string) {
 	writeRes(b, "http-get:*:image/jpeg:"+thumbs.ContentFeatures(size), 0, 0, 0, 0, baseURL+library.ThumbPath(id, name))
 }
 
-func writeRes(b *strings.Builder, protocolInfo string, size, durationMs int64, w, h int, url string) {
+func writeRes(b *strings.Builder, protocolInfo string, size, durationMs int64, w, h int, url string, attrs ...string) {
 	b.WriteString(`<res protocolInfo="` + esc(protocolInfo) + `"`)
 	if size > 0 {
 		b.WriteString(` size="` + strconv.FormatInt(size, 10) + `"`)
@@ -173,6 +179,9 @@ func writeRes(b *strings.Builder, protocolInfo string, size, durationMs int64, w
 	}
 	if w > 0 && h > 0 {
 		b.WriteString(` resolution="` + strconv.Itoa(w) + "x" + strconv.Itoa(h) + `"`)
+	}
+	for _, a := range attrs {
+		b.WriteString(a)
 	}
 	b.WriteString(`>` + esc(url) + `</res>`)
 }
