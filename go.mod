@@ -3,6 +3,7 @@ module github.com/novami/minor-dlna
 go 1.27.4
 
 require (
+	fyne.io/systray v1.12.2
 	github.com/dhowden/tag v0.0.0-20240417053706-3d75831295e8
 	github.com/rwcarlsen/goexif v0.0.0-20190401172101-9e8deecbddbd
 	golang.org/x/crypto v0.59.0
@@ -15,7 +16,6 @@ require (
 )
 
 require (
-	fyne.io/systray v1.12.2 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect

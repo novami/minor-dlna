@@ -34,6 +34,7 @@ import (
 	"github.com/novami/minor-dlna/internal/upnp"
 	"github.com/novami/minor-dlna/internal/version"
 	"github.com/novami/minor-dlna/internal/web"
+	"golang.org/x/sys/unix"
 )
 
 func main() {
@@ -210,7 +211,8 @@ func setupLogging(debug bool) {
 		level = slog.LevelDebug
 	}
 	out := io.Writer(os.Stderr)
-	if fi, err := os.Stderr.Stat(); err == nil && fi.Mode()&os.ModeCharDevice == 0 {
+	// Finder and launchd connect stderr to /dev/null, which is a character device but not a terminal.
+	if _, err := unix.IoctlGetTermios(int(os.Stderr.Fd()), unix.TIOCGETA); err != nil {
 		dir := macos.LogDir()
 		path := filepath.Join(dir, "minordlna.log")
 		if err := os.MkdirAll(dir, 0o755); err == nil {
