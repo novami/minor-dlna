@@ -38,12 +38,18 @@ if [ -n "${MINORDLNA_CODESIGN_P12:-}" ]; then
 fi
 if [ -s "$P12" ]; then
 	KC="$(mktemp -d)/minordlna-sign.keychain-db"
-	trap 'security delete-keychain "$KC" 2>/dev/null || true' EXIT
+	# Older macOS finds identities only in keychains on the search list.
+	OLD_KCS="$(security list-keychains -d user | tr -d '"' | xargs)"
+	trap 'security list-keychains -d user -s $OLD_KCS; security delete-keychain "$KC" 2>/dev/null || true' EXIT
 	security create-keychain -p minordlna "$KC"
 	security unlock-keychain -p minordlna "$KC"
 	security import "$P12" -f pkcs12 -k "$KC" -P minordlna -T /usr/bin/codesign >/dev/null
 	security set-key-partition-list -S apple-tool:,apple: -k minordlna "$KC" >/dev/null
-	codesign --force --sign MinorDLNA --keychain "$KC" --identifier cz.minordlna "$APP"
+	security list-keychains -d user -s "$KC" $OLD_KCS
+	# By hash, codesign takes the self-signed (untrusted) identity, which a name lookup may skip.
+	HASH="$(/usr/bin/openssl pkcs12 -in "$P12" -nokeys -passin pass:minordlna 2>/dev/null |/usr/bin/openssl x509 -noout -fingerprint -sha1 | sed 's/.*=//; s/://g')"
+	codesign --force --sign "$HASH" --keychain "$KC" --identifier cz.minordlna "$APP" ||
+		{ security find-identity "$KC" >&2; exit 1; }
 else
 	echo "warning: no signing certificate, signing ad-hoc (macOS asks for permissions after every build)" >&2
 	codesign --force --sign - --identifier cz.minordlna "$APP"
