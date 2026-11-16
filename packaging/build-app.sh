@@ -41,7 +41,7 @@ if [ -s "$P12" ]; then
 	trap 'security delete-keychain "$KC" 2>/dev/null || true' EXIT
 	security create-keychain -p minordlna "$KC"
 	security unlock-keychain -p minordlna "$KC"
-	security import "$P12" -k "$KC" -P minordlna -T /usr/bin/codesign >/dev/null
+	security import "$P12" -f pkcs12 -k "$KC" -P minordlna -T /usr/bin/codesign >/dev/null
 	security set-key-partition-list -S apple-tool:,apple: -k minordlna "$KC" >/dev/null
 	codesign --force --sign MinorDLNA --keychain "$KC" --identifier cz.minordlna "$APP"
 else
