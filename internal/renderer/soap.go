@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // SOAPError is a UPnP fault returned by the renderer.
@@ -16,6 +17,12 @@ type SOAPError struct {
 }
 
 func (e *SOAPError) Error() string { return fmt.Sprintf("upnp error %d: %s", e.Code, e.Desc) }
+
+// LG answers these only once playback starts or the seek lands, which takes well over 10 s for a big file.
+var (
+	slowActions = map[string]bool{"SetAVTransportURI": true, "Play": true, "Seek": true}
+	slowClient  = &http.Client{Timeout: 60 * time.Second}
+)
 
 // call invokes action on a UPnP service and returns the output arguments.
 func call(ctx context.Context, controlURL, service, action string, args [][2]string) (map[string]string, error) {
@@ -35,9 +42,13 @@ func call(ctx context.Context, controlURL, service, action string, args [][2]str
 	}
 	req.Header.Set("Content-Type", `text/xml; charset="utf-8"`)
 	req.Header.Set("SOAPAction", `"`+service+"#"+action+`"`)
-	resp, err := httpClient.Do(req)
+	client := httpClient
+	if slowActions[action] {
+		client = slowClient
+	}
+	resp, err := client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s: %w", action, err)
 	}
 	defer resp.Body.Close()
 	out, fault, err := parseResponse(io.LimitReader(resp.Body, 1<<20))
