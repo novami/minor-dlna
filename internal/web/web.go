@@ -109,6 +109,7 @@ type stateJSON struct {
 	DTS          bool          `json:"dts"`
 	HWAccel      string        `json:"hwaccel"`
 	Suggestions  []libraryJSON `json:"suggestions"`
+	Home         string        `json:"home"`
 }
 
 func (s *Server) state(w http.ResponseWriter, r *http.Request) {
@@ -126,7 +127,7 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 		SetupNeeded: len(s.Cfg.Libraries) == 0, Autostart: macos.AutostartEnabled(),
 		FFmpeg: s.FFmpeg, Scanning: s.Scanner.Scanning(), Addresses: lanAddresses(s.Cfg.Port),
 		Libraries: libs, DTS: s.Cfg.Transcode.DTSEnabled(), HWAccel: s.Cfg.Transcode.HWAccel,
-		Suggestions: suggestions(),
+		Suggestions: suggestions(), Home: homeDir(),
 	})
 }
 
@@ -284,4 +285,9 @@ func Ping(port int) bool {
 	b := make([]byte, 16)
 	n, _ := resp.Body.Read(b)
 	return string(b[:n]) == "minordlna"
+}
+
+func homeDir() string {
+	h, _ := os.UserHomeDir()
+	return h
 }

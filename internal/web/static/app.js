@@ -9,7 +9,13 @@ let draft = null;   // edited settings
 let step = 0;       // wizard step
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const short = (p) => (p || "").replace(/^\/Users\/[^/]+/, "~");
+// Shortens only the current user's home to "~"; other users' folders keep their full path.
+const short = (p) => {
+  p = p || "";
+  const home = state && state.home;
+  if (home && (p === home || p.startsWith(home + "/"))) return "~" + p.slice(home.length);
+  return p;
+};
 
 async function api(path, body) {
   const opts = body === undefined ? {} : {
