@@ -109,6 +109,9 @@ func (c *Config) Save(path string) error {
 	return os.Rename(tmp, path)
 }
 
+// Validate checks and normalizes the configuration.
+func (c *Config) Validate() error { return c.validate() }
+
 func (c *Config) validate() error {
 	if c.Port <= 0 || c.Port > 65535 {
 		return fmt.Errorf("invalid port %d", c.Port)
@@ -132,8 +135,20 @@ func (c *Config) validate() error {
 		}
 		c.allow = append(c.allow, p)
 	}
+	seen := map[string]bool{}
 	for i := range c.Libraries {
 		l := &c.Libraries[i]
+		l.Name = strings.TrimSpace(l.Name)
+		if l.Name == "" {
+			return fmt.Errorf("library %d: name is empty", i+1)
+		}
+		if seen[l.Name] {
+			return fmt.Errorf("library name %q is used twice", l.Name)
+		}
+		seen[l.Name] = true
+		if len(l.Paths) == 0 {
+			return fmt.Errorf("library %q: no folder", l.Name)
+		}
 		switch l.Type {
 		case Movies, Shows, Videos, Photos, Music:
 		default:

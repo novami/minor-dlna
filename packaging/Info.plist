@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>cz.minordlna</string>
+	<key>CFBundleName</key>
+	<string>MinorDLNA</string>
+	<key>CFBundleDisplayName</key>
+	<string>MinorDLNA</string>
+	<key>CFBundleExecutable</key>
+	<string>minordlna</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>__VERSION__</string>
+	<key>CFBundleVersion</key>
+	<string>__VERSION__</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>12.0</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.entertainment</string>
+	<!-- Background app: no Dock icon or window, the UI opens in the browser. -->
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>MinorDLNA potřebuje přístup k místní síti, aby ho televize našla a mohla přehrávat vaše média.</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>MIT License</string>
+</dict>
+</plist>

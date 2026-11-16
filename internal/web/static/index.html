@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MinorDLNA</title>
+<link rel="icon" href="/icon/120.png">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="top">
+  <img class="logo" src="/icon/120.png" alt="">
+  <div>
+    <h1>MinorDLNA</h1>
+    <p class="sub" id="subtitle">Načítám…</p>
+  </div>
+  <span class="pill" id="status" hidden></span>
+</header>
+<main id="app"></main>
+<div class="overlay" id="overlay" hidden>
+  <div class="spinner"></div>
+  <p id="overlay-text">Restartuji server…</p>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>

@@ -99,6 +99,24 @@ func NewCatalog(ctx context.Context, st *store.Store, cfg []config.Library) (*Ca
 
 func (c *Catalog) Libraries() []*Library { return c.libs }
 
+// Counts returns the number of indexed items per library ID.
+func (c *Catalog) Counts(ctx context.Context) map[int64]int {
+	out := map[int64]int{}
+	rows, err := c.st.DB.QueryContext(ctx, `SELECT library_id, COUNT(*) FROM item GROUP BY library_id`)
+	if err != nil {
+		return out
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
+		var n int
+		if rows.Scan(&id, &n) == nil {
+			out[id] = n
+		}
+	}
+	return out
+}
+
 func (c *Catalog) UpdateID(ctx context.Context) uint32 { return c.st.UpdateID(ctx) }
 
 // view is a fixed container inside a library.

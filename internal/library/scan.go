@@ -33,13 +33,31 @@ type Scanner struct {
 	OnChange func(updateID uint32)
 	OnRemove func(itemIDs []int64) // e.g. purge cached thumbnails
 
-	mu      sync.Mutex
-	dirs    map[int64]map[string]time.Time // library → folder → mtime at last scan
-	pending map[int64]bool                 // library has files still being written
+	rescan chan struct{}
+
+	mu       sync.Mutex
+	scanning bool
+	dirs     map[int64]map[string]time.Time // library → folder → mtime at last scan
+	pending  map[int64]bool                 // library has files still being written
 }
 
 func NewScanner(cat *Catalog, prober *media.Prober) *Scanner {
-	return &Scanner{cat: cat, prober: prober, dirs: map[int64]map[string]time.Time{}, pending: map[int64]bool{}}
+	return &Scanner{cat: cat, prober: prober, rescan: make(chan struct{}, 1), dirs: map[int64]map[string]time.Time{}, pending: map[int64]bool{}}
+}
+
+// Rescan requests a full scan of all libraries.
+func (s *Scanner) Rescan() {
+	select {
+	case s.rescan <- struct{}{}:
+	default:
+	}
+}
+
+// Scanning reports whether a scan is in progress.
+func (s *Scanner) Scanning() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.scanning
 }
 
 // Run scans everything, then keeps checking for changes until ctx is done.
@@ -58,6 +76,8 @@ func (s *Scanner) Run(ctx context.Context) {
 			return
 		case <-full.C:
 			s.scanAll(ctx, true)
+		case <-s.rescan:
+			s.scanAll(ctx, true)
 		case <-check.C:
 			s.scanAll(ctx, false)
 		}
@@ -65,6 +85,14 @@ func (s *Scanner) Run(ctx context.Context) {
 }
 
 func (s *Scanner) scanAll(ctx context.Context, force bool) {
+	s.mu.Lock()
+	s.scanning = true
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.scanning = false
+		s.mu.Unlock()
+	}()
 	changed := false
 	for _, lib := range s.cat.Libraries() {
 		if !force && !s.needsScan(lib) {

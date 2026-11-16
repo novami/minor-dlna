@@ -2,6 +2,7 @@ package upnp
 
 import (
 	"os"
+	"strconv"
 	"testing"
 )
 
@@ -11,7 +12,11 @@ func TestExportIcon(t *testing.T) {
 	if out == "" {
 		t.Skip("set ICON_OUT to export")
 	}
-	if err := os.WriteFile(out, renderIcon(512), 0o644); err != nil {
+	size := 512
+	if v, err := strconv.Atoi(os.Getenv("ICON_SIZE")); err == nil {
+		size = v
+	}
+	if err := os.WriteFile(out, renderIcon(size), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

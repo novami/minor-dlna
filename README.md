@@ -7,31 +7,17 @@ Stav: fáze 4 – index v SQLite, pohledy Filmy (A–Z, naposledy přidané, pod
 ## Spuštění
 
 ```bash
-make build
-./bin/minordlna -debug
+make install-app
 ```
 
-První spuštění vytvoří `~/Library/Application Support/MinorDLNA/config.yaml`. Doplňte knihovny a restartujte:
+Sestaví `MinorDLNA.app` a zkopíruje ji do `~/Applications`. Pak ji spusťte z Finderu nebo Spotlightu: aplikace běží na pozadí (bez ikony v Docku) a otevře v prohlížeči průvodce prvním nastavením – název serveru, složky s médii (výběr přes okno macOS), DTS a spouštění po přihlášení. Další spuštění otevře nastavení běžícího serveru.
 
-```yaml
-libraries:
-  - { name: Filmy, type: movies, paths: ["~/Movies"] }
-  - { name: Fotky, type: photos, paths: ["~/Pictures/Export"] }
-  - { name: Hudba, type: music,  paths: ["~/Music"] }
-```
+- Nastavení: `~/Library/Application Support/MinorDLNA/config.yaml` (index a cache vedle)
+- Logy: `~/Library/Logs/MinorDLNA/minordlna.log`
+- Správa: `http://localhost:8200/` – jen z tohoto Macu
+- macOS se při prvním spuštění zeptá na přístup k místní síti – bez povolení TV server neuvidí.
 
-Typy: `movies`, `shows`, `videos`, `photos`, `music`.
-
-Volitelně:
-
-```yaml
-transcode:
-  hwaccel: videotoolbox   # nebo none (softwarové kódování)
-  max_sessions: 2
-  dts: false              # TV neumí DTS (záleží na řadě LG)
-``` Na TV: *Domů → Média / Připojená zařízení*.
-
-macOS se při prvním spuštění zeptá na přístup k místní síti – bez povolení TV server neuvidí.
+Pro vývoj: `make run` (server v terminálu, logy na stderr).
 
 ## Licence
 

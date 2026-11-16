@@ -195,8 +195,12 @@ updates:
   check_interval: 24h
 ```
 
-- Konfigurace i web UI mění stejný soubor (`config.yaml` v data dir).
-- `minordlna install` zkopíruje binárku do `~/Library/Application Support/MinorDLNA/bin` (zapisovatelné → možné aktualizace) a vygeneruje LaunchAgent `~/Library/LaunchAgents/cz.minordlna.plist` (RunAtLoad, KeepAlive) – bez další knihovny.
+- Konfigurace i web UI mění stejný soubor (`config.yaml` v data dir); uložení z UI restartuje server uvnitř procesu (bez nového spuštění).
+- **Aplikace:** `MinorDLNA.app` (univerzální binárka, ad-hoc podpis s identifikátorem `cz.minordlna`, `LSUIElement` = bez Docku, `NSLocalNetworkUsageDescription`). Spuštění z Finderu otevře v prohlížeči průvodce (první spuštění) nebo nastavení; druhé spuštění jen otevře stránku běžící instance. Bez cgo není ikona v menu baru – ovládání je ve webu (vč. „Ukončit server“).
+- **Průvodce:** název serveru (předvyplněn název Macu), knihovny – návrhy `~/Movies`, `~/Pictures`, `~/Music` jedním klikem nebo nativní výběr složky (`osascript choose folder`), typ odhadnutý z cesty; DTS (výchozí „nevím“ = převádět); spouštění po přihlášení.
+- **Spouštění po přihlášení:** LaunchAgent `~/Library/LaunchAgents/cz.minordlna.plist` s `-background`, `KeepAlive` jen po pádu (běžné ukončení zůstane ukončené). Aktualizace v budoucnu nahradí celý `.app` bundle.
+- **Logy:** `~/Library/Logs/MinorDLNA/minordlna.log` (při spuštění mimo terminál), rotace nad 10 MB.
+- **Bezpečnost správy:** jen z loopbacku, Host musí být loopback (ochrana proti DNS rebinding), změny jen s hlavičkou `X-MinorDLNA` (ochrana proti CSRF). Přístup z jiných zařízení s heslem – fáze 5.
 - Proti uspání Macu: během aktivního streamu běží subproces `caffeinate -i -w <pid>`; navíc doporučit *Probudit pro přístup k síti*.
 - ffmpeg z Homebrew (`brew install ffmpeg`), nedistribuuje se s binárkou.
 - Build: `GOOS=darwin GOARCH=arm64|amd64`, volitelně universal binárka přes `lipo`.
