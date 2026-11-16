@@ -62,7 +62,7 @@ async function load() {
     password: "",
   };
   render();
-  if (!state.setup_needed) { loadUpdate(); loadStorage(); loadMeta(); }
+  if (!state.setup_needed) { loadUpdate(); loadStorage(); loadMeta(); tvLoad(); }
 }
 
 function header() {
@@ -295,6 +295,7 @@ function home() {
       ${state.ffmpeg ? "" : ffmpegNotice()}
       <div class="actions"><button onclick="rescan(this)">Prohledat znovu</button></div>
     </section>
+    <section class="card" id="tvcard">${tvCard()}</section>
     <section class="card" id="updates">${updatesCard()}</section>
     <section class="card" id="storage">${storageCard()}</section>
     <div class="foot">
@@ -417,8 +418,10 @@ function card(it, i) {
   const icon = it.dir ? "📁" : it.kind === "audio" ? "♪" : it.kind === "photo" ? "🖼" : "▶";
   const art = it.art ? `<img loading="lazy" src="${esc(it.art)}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'ph',textContent:'${icon}'}))">` : `<div class="ph">${icon}</div>`;
   const sub = it.dir ? (it.count >= 0 ? `${it.count} položek` : "") : (it.info || "");
+  const seen = it.watched ? `<span class="seen">✓</span>` : "";
+  const bar = it.position_ms > 0 && it.duration_ms ? `<div class="pbar"><i style="width:${Math.min(100, it.position_ms / it.duration_ms * 100).toFixed(1)}%"></i></div>` : "";
   return `<button class="tile" onclick="openItem(${i})" title="${esc(it.title)}">
-    <div class="art">${art}</div>
+    <div class="art">${art}${seen}${bar}</div>
     <div class="meta"><b>${esc(it.title)}</b>${sub ? `<small>${esc(sub)}</small>` : ""}</div>
   </button>`;
 }
@@ -442,6 +445,8 @@ window.openItem = (i) => {
     openFolder(it.id);
   } else if (it.kind === "photo" && it.large) {
     lightbox(i);
+  } else if (it.kind === "video" || it.kind === "audio") {
+    tvSheet(it);
   }
 };
 

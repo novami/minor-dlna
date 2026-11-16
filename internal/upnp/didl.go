@@ -92,6 +92,10 @@ func writeItem(b *strings.Builder, o library.Object, baseURL string, opts Render
 		if o.Description != "" {
 			b.WriteString(`<dc:description>` + esc(o.Description) + `</dc:description>`)
 		}
+		if o.PositionMs > 0 {
+			// UPnP AV bookmark; whether LG resumes from it is unverified.
+			b.WriteString(`<upnp:lastPlaybackPosition>` + formatDuration(o.PositionMs) + `</upnp:lastPlaybackPosition>`)
+		}
 	}
 	writeArt(b, o, baseURL)
 	subURL := ""
@@ -104,13 +108,7 @@ func writeItem(b *strings.Builder, o library.Object, baseURL string, opts Render
 	case o.Format.Kind == dlna.Image:
 		writePhotoRes(b, o, baseURL)
 	default:
-		plan := transcode.Plan{}
-		if opts.Transcode {
-			plan = transcode.Decide(opts.Profile, transcode.Media{
-				Audio: o.Format.Kind == dlna.Audio, Container: o.Container, VideoCodec: o.VideoCodec,
-				AudioCodec: o.AudioCodec, PixFmt: o.PixFmt, Channels: o.Channels,
-			})
-		}
+		plan := playPlan(o, opts)
 		if plan.Direct() {
 			writeRes(b, dlna.ProtocolInfo(o.Format), o.Size, o.DurationMs, o.Width, o.Height, baseURL+o.MediaPath)
 		} else {
@@ -122,6 +120,25 @@ func writeItem(b *strings.Builder, o library.Object, baseURL string, opts Render
 		writeRes(b, "http-get:*:text/srt:*", 0, 0, 0, 0, subURL)
 	}
 	b.WriteString(`</item>`)
+}
+
+func playPlan(o library.Object, opts RenderOpts) transcode.Plan {
+	if !opts.Transcode {
+		return transcode.Plan{}
+	}
+	return transcode.Decide(opts.Profile, transcode.Media{
+		Audio: o.Format.Kind == dlna.Audio, Container: o.Container, VideoCodec: o.VideoCodec,
+		AudioCodec: o.AudioCodec, PixFmt: o.PixFmt, Channels: o.Channels,
+	})
+}
+
+// StreamURL is the URL of the audio or video resource DIDL offers for o, with its protocolInfo.
+func StreamURL(o library.Object, baseURL string, opts RenderOpts) (url, protocolInfo string) {
+	plan := playPlan(o, opts)
+	if plan.Direct() {
+		return baseURL + o.MediaPath, dlna.ProtocolInfo(o.Format)
+	}
+	return baseURL + transcode.Path(o.ID, plan), transcode.ProtocolInfo(plan)
 }
 
 // writePhotoRes lists a TV-sized rendition first (LG picks the first resource), then the original and smaller sizes.

@@ -62,6 +62,8 @@ type Object struct {
 	Channels    int
 	Subtitle    string // path of an external .srt
 	Description string // plot summary from the movie metadata
+	PositionMs  int64  // saved playback position, 0 = from the start
+	Watched     bool
 }
 
 type Library struct {
@@ -472,8 +474,8 @@ func (c *Catalog) items(ctx context.Context, parent string, tc titleCtx, where, 
 		i.season, i.episode, i.episode_title, i.duration_ms, i.width, i.height, s.name,
 		i.orientation, i.taken_at, i.artist, al.title, g.name, i.track, i.has_art,
 		i.container, i.video_codec, i.audio_codec, i.pix_fmt, i.audio_channels, i.subtitle,
-		m.id, m.title, m.year, m.overview, m.genres, m.poster
-		FROM item i LEFT JOIN show s ON s.id = i.show_id LEFT JOIN album al ON al.id = i.album_id
+		m.id, m.title, m.year, m.overview, m.genres, m.poster, p.position_ms, p.watched
+		FROM item i LEFT JOIN play_state p ON p.path = i.path LEFT JOIN show s ON s.id = i.show_id LEFT JOIN album al ON al.id = i.album_id
 		LEFT JOIN genre g ON g.id = i.genre_id ` + movieMeta + ` WHERE ` + where + ` ORDER BY ` + order + ` LIMIT ? OFFSET ?`
 	rows, err := c.st.DB.QueryContext(ctx, q, append(args, limit, start)...)
 	if err != nil {
@@ -499,16 +501,19 @@ func (c *Catalog) items(ctx context.Context, parent string, tc titleCtx, where, 
 			metaTitle, overview     sql.NullString
 			metaGenres              sql.NullString
 			poster                  sql.NullBool
+			position                sql.NullInt64
+			watched                 sql.NullBool
 		)
 		if err := rows.Scan(&id, &libID, &dirID, &o.Path, &name, &mime, &kind, &o.Size, &mtime, &o.Title, &year,
 			&season, &episode, &epTitle, &dur, &w, &h, &show,
 			&orient, &taken, &artist, &album, &genre, &track, &hasArt,
 			&cont, &vc, &ac, &pix, &channels, &sub,
-			&metaID, &metaTitle, &metaYear, &overview, &metaGenres, &poster); err != nil {
+			&metaID, &metaTitle, &metaYear, &overview, &metaGenres, &poster, &position, &watched); err != nil {
 			return nil, err
 		}
 		o.Container, o.VideoCodec, o.AudioCodec, o.PixFmt = cont.String, vc.String, ac.String, pix.String
 		o.Channels, o.Subtitle = int(channels.Int64), sub.String
+		o.PositionMs, o.Watched = position.Int64, watched.Bool
 		o.Orientation, o.Track = int(orient.Int64), int(track.Int64)
 		o.Artist, o.Album, o.Genre = artist.String, album.String, genre.String
 		if taken.Valid {

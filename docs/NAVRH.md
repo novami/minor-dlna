@@ -101,9 +101,9 @@ internal/version/            verze vložená při buildu (-ldflags)
 
 - SSDP M-SEARCH na `urn:schemas-upnp-org:device:MediaRenderer:1`, seznam TV ve web UI (LG je MediaRenderer, pokud má zapnuté *Sdílení obrazovky / DLNA*).
 - `SetAVTransportURI` (URL streamu + DIDL metadata) → `Play`; ovládání `Pause`, `Seek` (`REL_TIME`), `Stop`, `SetVolume`/`SetMute` (RenderingControl).
-- Stav: GENA `LastChange` + polling `GetPositionInfo`/`GetTransportInfo` každé 2 s → **přesná pozice** do play state, „pokračovat od 1:12:30“ = `Seek` po startu na uloženou pozici − 5 s. Vypnutí TV (renderer přestane odpovídat) = platí poslední zjištěná pozice.
-- Fronta: další epizoda seriálu automaticky (`SetNextAVTransportURI`, pokud ji TV podporuje; jinak po `STOPPED`).
-- Zapnutí TV: Wake-on-LAN (volitelně, MAC adresa TV v nastavení); LG musí mít povolené *Zapnout přes Wi-Fi/LAN*.
+- Stav: polling `GetPositionInfo`/`GetTransportInfo` každé 2 s (bez GENA) → **přesná pozice** do play state (tabulka `play_state` podle cesty souboru, přežije reindex), ukládá se každých 10 s a při zastavení; „pokračovat od 1:12:30“ = `Seek` po startu na uloženou pozici − 5 s. Vypnutí TV (5 neúspěšných dotazů) = platí poslední zjištěná pozice; jiný obsah spuštěný na TV ukončí relaci.
+- Fronta: další epizoda seriálu automaticky po `STOPPED`, pokud díl doběhl do konce (posledních 15 s). Zhlédnuto při ≥ 90 %.
+- Zapnutí TV: Wake-on-LAN; MAC adresu si server zjistí z ARP tabulky při nalezení TV (tabulka `renderer`). Když TV při „Přehrát na TV“ neodpovídá, server ji zapne a čeká až 60 s. LG musí mít povolené *Zapnout přes Wi-Fi/LAN*.
 
 ## 5. Přehrávání: direct play vs. transkódování
 

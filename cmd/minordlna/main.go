@@ -25,6 +25,7 @@ import (
 	"github.com/novami/minor-dlna/internal/macos"
 	"github.com/novami/minor-dlna/internal/media"
 	"github.com/novami/minor-dlna/internal/metadata"
+	"github.com/novami/minor-dlna/internal/renderer"
 	"github.com/novami/minor-dlna/internal/ssdp"
 	"github.com/novami/minor-dlna/internal/store"
 	"github.com/novami/minor-dlna/internal/stream"
@@ -302,8 +303,19 @@ func run(parent context.Context, quit context.CancelFunc, cfgPath string, openBr
 	go upd.Run(ctx)
 	live.Store(&current{cfg: cfg, scanner: scanner, upd: upd, tc: tc})
 	defer live.Store(nil)
+	tv := &renderer.Controller{
+		DB: st.DB, Cat: cat, Port: cfg.Port, Interfaces: cfg.Interfaces,
+		DTS: cfg.Transcode.DTSEnabled(), Transcode: ffmpeg != "",
+		OnProgress: func() {
+			if _, err := st.BumpUpdateID(ctx); err == nil {
+				dev.NotifyChange()
+			}
+		},
+	}
+	tvDone := make(chan struct{})
+	go func() { tv.Run(ctx); close(tvDone) }()
 	ui := &web.Server{
-		Cfg: cfg, CfgPath: cfgPath, Cat: cat, Scanner: scanner, Version: version.Version, FFmpeg: ffmpeg != "", Updates: upd, Meta: meta,
+		Cfg: cfg, CfgPath: cfgPath, Cat: cat, Scanner: scanner, Version: version.Version, FFmpeg: ffmpeg != "", Updates: upd, Meta: meta, TV: tv,
 		Restart: func() { restart.Store(true); cancel() },
 		Quit:    quit,
 	}
@@ -366,6 +378,7 @@ func run(parent context.Context, quit context.CancelFunc, cfgPath string, openBr
 	}
 	err = <-ssdpDone
 	<-scanDone // the scanner must finish before the database closes
+	<-tvDone
 	exe, _ := newExe.Load().(string)
 	if !restart.Load() && exe == "" {
 		slog.Info("MinorDLNA stopped")

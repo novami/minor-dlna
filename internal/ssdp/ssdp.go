@@ -113,8 +113,10 @@ func (s *Server) refreshInterfaces() bool {
 	return added
 }
 
-// interfaces returns usable LAN interfaces.
-func (s *Server) interfaces() []net.Interface {
+func (s *Server) interfaces() []net.Interface { return LANInterfaces(s.Interfaces) }
+
+// LANInterfaces returns usable LAN interfaces; names limits them, empty = auto.
+func LANInterfaces(names []string) []net.Interface {
 	all, err := net.Interfaces()
 	if err != nil {
 		return nil
@@ -124,8 +126,8 @@ func (s *Server) interfaces() []net.Interface {
 		if ifi.Flags&net.FlagUp == 0 || ifi.Flags&net.FlagMulticast == 0 || ifi.Flags&net.FlagLoopback != 0 {
 			continue
 		}
-		if len(s.Interfaces) > 0 {
-			if !slices.Contains(s.Interfaces, ifi.Name) {
+		if len(names) > 0 {
+			if !slices.Contains(names, ifi.Name) {
 				continue
 			}
 		} else if skipIface(ifi.Name) {

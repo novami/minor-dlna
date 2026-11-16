@@ -22,6 +22,7 @@ import (
 	"github.com/novami/minor-dlna/internal/library"
 	"github.com/novami/minor-dlna/internal/macos"
 	"github.com/novami/minor-dlna/internal/metadata"
+	"github.com/novami/minor-dlna/internal/renderer"
 	"github.com/novami/minor-dlna/internal/update"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -38,6 +39,7 @@ type Server struct {
 	FFmpeg  bool
 	Updates *update.Manager
 	Meta    *metadata.Service
+	TV      *renderer.Controller
 	Restart func() // apply a saved config
 	Quit    func()
 }
@@ -75,6 +77,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.Handle("GET /api/meta", s.local(http.HandlerFunc(s.metaList)))
 	mux.Handle("GET /api/meta/search", s.local(http.HandlerFunc(s.metaSearch)))
 	mux.Handle("POST /api/meta/set", s.local(http.HandlerFunc(s.metaSet)))
+	s.registerTV(mux)
 	mux.Handle("GET /api/update", s.local(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, s.Updates.State())
 	})))
@@ -425,7 +428,11 @@ type browseItem struct {
 	Large string `json:"large,omitempty"` // full-size photo
 	Info  string `json:"info,omitempty"`
 	// Poster marks a movie or show poster (portrait) rather than a video frame.
-	Poster bool `json:"poster,omitempty"`
+	Poster     bool   `json:"poster,omitempty"`
+	Desc       string `json:"desc,omitempty"`
+	DurationMs int64  `json:"duration_ms,omitempty"`
+	PositionMs int64  `json:"position_ms,omitempty"`
+	Watched    bool   `json:"watched,omitempty"`
 }
 
 // browse lists the same tree the TV sees, with thumbnails for the web library view.
@@ -458,6 +465,7 @@ func (s *Server) browse(w http.ResponseWriter, r *http.Request) {
 			it.Art = strings.Replace(o.ArtPath, "/tn.jpg", "/sm.jpg", 1)
 		}
 		if !o.IsDir {
+			it.Desc, it.DurationMs, it.PositionMs, it.Watched = o.Description, o.DurationMs, o.PositionMs, o.Watched
 			switch o.Format.Kind {
 			case dlna.Image:
 				it.Kind = "photo"
