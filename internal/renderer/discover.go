@@ -51,6 +51,7 @@ func Search(ctx context.Context, ifaces []string, wait time.Duration) ([]Device,
 	msg := []byte("M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: " + DeviceType + "\r\n\r\n")
 	dst := &net.UDPAddr{IP: net.IPv4(239, 255, 255, 250), Port: 1900}
 	sent := false
+	var sendErr error
 	for _, ifi := range ssdp.LANInterfaces(ifaces) {
 		if p.SetMulticastInterface(&ifi) != nil {
 			continue
@@ -58,8 +59,14 @@ func Search(ctx context.Context, ifaces []string, wait time.Duration) ([]Device,
 		for range 2 { // UDP may drop one
 			if _, err := p.WriteTo(msg, nil, dst); err == nil {
 				sent = true
+			} else {
+				sendErr = err
 			}
 		}
+	}
+	if !sent && sendErr != nil {
+		// An interface is up but sending fails: macOS denies the app its local network permission.
+		return nil, fmt.Errorf("macOS blokuje přístup k místní síti – povolte MinorDLNA v Nastavení systému → Soukromí a zabezpečení → Místní síť (%w)", sendErr)
 	}
 	if !sent {
 		return nil, errors.New("no network interface for discovery")

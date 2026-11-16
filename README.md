@@ -24,7 +24,7 @@ Pro vývoj: `make run` (server v terminálu, logy na stderr).
 
 ## Vydání nové verze
 
-Tag `vX.Y.Z` spustí `.github/workflows/release.yml`: sestaví aplikaci, podepíše `checksums.txt` a vytvoří GitHub Release. Workflow potřebuje secret `MINORDLNA_SIGNING_KEY` (obsah souboru se soukromým klíčem z `go run ./tools/release keygen`).
+Tag `vX.Y.Z` spustí `.github/workflows/release.yml`: sestaví aplikaci, podepíše `checksums.txt` a vytvoří GitHub Release. Workflow potřebuje secret `MINORDLNA_SIGNING_KEY` (obsah souboru se soukromým klíčem z `go run ./tools/release keygen`) a `MINORDLNA_CODESIGN_P12` (base64 certifikátu z `packaging/codesign-keygen.sh`). Aplikace podepsaná stále stejným certifikátem si po aktualizaci ponechá povolení Místní síť; lokální `make app` ho bere z `~/.config/minordlna/codesign.p12`.
 
 ## Licence
 

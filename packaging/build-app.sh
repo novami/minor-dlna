@@ -27,6 +27,25 @@ rm dist/minordlna-arm64 dist/minordlna-amd64
 sed "s/__VERSION__/$PLIST_VERSION/g" packaging/Info.plist > "$APP/Contents/Info.plist"
 cp packaging/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
-# A stable identifier keeps the macOS local network permission across rebuilds.
-codesign --force --sign - --identifier cz.minordlna "$APP"
+# Signed by our own certificate, macOS keeps the local network and menu bar permissions across
+# builds and updates. The certificate comes from MINORDLNA_CODESIGN_P12 (base64, CI) or
+# ~/.config/minordlna/codesign.p12 (packaging/codesign-keygen.sh); without it, ad-hoc signing.
+P12="$HOME/.config/minordlna/codesign.p12"
+KC=""
+if [ -n "${MINORDLNA_CODESIGN_P12:-}" ]; then
+	P12="$(mktemp)"
+	echo "$MINORDLNA_CODESIGN_P12" | base64 -D > "$P12"
+fi
+if [ -s "$P12" ]; then
+	KC="$(mktemp -d)/minordlna-sign.keychain-db"
+	trap 'security delete-keychain "$KC" 2>/dev/null || true' EXIT
+	security create-keychain -p minordlna "$KC"
+	security unlock-keychain -p minordlna "$KC"
+	security import "$P12" -k "$KC" -P minordlna -T /usr/bin/codesign >/dev/null
+	security set-key-partition-list -S apple-tool:,apple: -k minordlna "$KC" >/dev/null
+	codesign --force --sign MinorDLNA --keychain "$KC" --identifier cz.minordlna "$APP"
+else
+	echo "warning: no signing certificate, signing ad-hoc (macOS asks for permissions after every build)" >&2
+	codesign --force --sign - --identifier cz.minordlna "$APP"
+fi
 echo "Built $APP ($VERSION)"

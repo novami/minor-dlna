@@ -20,7 +20,11 @@ jobs:
       - name: Build app
         env:
           VERSION: ${{ github.ref_name }}
-        run: packaging/build-app.sh
+          MINORDLNA_CODESIGN_P12: ${{ secrets.MINORDLNA_CODESIGN_P12 }}
+        run: |
+          # Ad-hoc signed releases would lose the local network permission on every update.
+          test -n "$MINORDLNA_CODESIGN_P12" || { echo "secret MINORDLNA_CODESIGN_P12 missing"; exit 1; }
+          packaging/build-app.sh
 
       - name: Package and sign
         env:
