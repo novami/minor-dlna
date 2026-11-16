@@ -61,6 +61,7 @@ type Object struct {
 	PixFmt      string
 	Channels    int
 	Subtitle    string // path of an external .srt
+	Description string // plot summary from the movie metadata
 }
 
 type Library struct {
@@ -189,7 +190,7 @@ func (c *Catalog) Metadata(ctx context.Context, id string) (Object, error) {
 		}
 		var name string
 		var lid int64
-		if err := c.st.DB.QueryRowContext(ctx, `SELECT name, library_id FROM show WHERE id = ?`, showID).Scan(&name, &lid); err != nil {
+		if err := c.st.DB.QueryRowContext(ctx, `SELECT COALESCE(m.title, s.name), s.library_id FROM show s `+showMeta+` WHERE s.id = ?`, showID).Scan(&name, &lid); err != nil {
 			return Object{}, ErrNotFound
 		}
 		if hasSeason {
@@ -272,7 +273,7 @@ func (c *Catalog) libChildren(ctx context.Context, lib *Library, id, v string, s
 	case v == "folders":
 		return c.folders(ctx, lib, id, start, count)
 	case v == "all":
-		return c.itemPage(ctx, id, ctxMovie, `i.library_id = ?`, "i.sort_title", start, count, lid)
+		return c.itemPage(ctx, id, ctxMovie, `i.library_id = ?`, titleOrder, start, count, lid)
 	case v == "recent":
 		if start >= recentLimit {
 			return nil, 0, nil
@@ -293,14 +294,15 @@ func (c *Catalog) libChildren(ctx context.Context, lib *Library, id, v string, s
 		if err != nil {
 			return nil, 0, ErrNotFound
 		}
-		return c.itemPage(ctx, id, ctxMovie, `i.library_id = ? AND i.year = ?`, "i.sort_title", start, count, lid, year)
+		return c.itemPage(ctx, id, ctxMovie, `i.library_id = ? AND i.year = ?`, titleOrder, start, count, lid, year)
 	case v == "dates", strings.HasPrefix(v, "py"), strings.HasPrefix(v, "pm"):
 		return c.photoDates(ctx, lib, id, v, start, count)
 	case v == "artists", v == "albums", v == "genres":
 		return c.musicLists(ctx, lib, id, v, start, count)
 	case v == "shows":
-		return c.groupsNamed(ctx, id, `SELECT s.id, s.name, COUNT(i.id) FROM show s JOIN item i ON i.show_id = s.id
-			WHERE s.library_id = ? GROUP BY s.id ORDER BY s.sort_name`, "S", start, count, lid)
+		return c.groupsNamed(ctx, id, `SELECT s.id, COALESCE(m.title, s.name), COUNT(i.id), m.id, m.poster
+			FROM show s JOIN item i ON i.show_id = s.id `+showMeta+`
+			WHERE s.library_id = ? GROUP BY s.id ORDER BY COALESCE(m.sort_title, s.sort_name)`, "S", start, count, lid)
 	}
 	return nil, 0, ErrNotFound
 }
@@ -358,7 +360,7 @@ func (c *Catalog) dirChildren(ctx context.Context, id string, dirID int64, start
 			return out, nDirs + n, err
 		}
 	}
-	items, nItems, err := c.itemPage(ctx, id, ctxFolder, `i.dir_id = ?`, "i.sort_title", itemStart, itemCount, dirID)
+	items, nItems, err := c.itemPage(ctx, id, ctxFolder, `i.dir_id = ?`, titleOrder, itemStart, itemCount, dirID)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -398,22 +400,46 @@ func (c *Catalog) groups(ctx context.Context, parent, q string, mk func(int64) (
 	return page(out, start, count), len(out), rows.Err()
 }
 
-// groupsNamed lists containers from an "id, name, count" query.
+// showMeta joins the matched metadata of a show s.
+const showMeta = `LEFT JOIN meta_match m ON m.kind = 'shows' AND m.status IN (1, 2) AND m.query = s.name || '|'`
+
+// movieMeta joins the matched metadata of a movie item i.
+const movieMeta = `LEFT JOIN library l ON l.id = i.library_id
+	LEFT JOIN meta_match m ON l.type = 'movies' AND m.kind = 'movies' AND m.status IN (1, 2) AND m.query = i.title || '|' || IFNULL(i.year, '')`
+
+// titleOrder sorts items by the matched title, else by the file name title.
+const titleOrder = "COALESCE(m.sort_title, i.sort_title)"
+
+// groupsNamed lists containers from an "id, name, count" query, optionally followed by "meta id, has poster".
 func (c *Catalog) groupsNamed(ctx context.Context, parent, q, prefix string, start, count int, args ...any) ([]Object, int, error) {
 	rows, err := c.st.DB.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, 0, err
 	}
 	defer rows.Close()
+	cols, err := rows.Columns()
+	if err != nil {
+		return nil, 0, err
+	}
 	var out []Object
 	for rows.Next() {
 		var k int64
 		var name string
 		var n int
-		if err := rows.Scan(&k, &name, &n); err != nil {
+		var metaID sql.NullInt64
+		var poster sql.NullBool
+		dst := []any{&k, &name, &n}
+		if len(cols) == 5 {
+			dst = append(dst, &metaID, &poster)
+		}
+		if err := rows.Scan(dst...); err != nil {
 			return nil, 0, err
 		}
-		out = append(out, container(prefix+strconv.FormatInt(k, 10), parent, name, n))
+		o := container(prefix+strconv.FormatInt(k, 10), parent, name, n)
+		if poster.Bool {
+			o.ArtPath = PosterPath(metaID.Int64, "tn")
+		}
+		out = append(out, o)
 	}
 	return page(out, start, count), len(out), rows.Err()
 }
@@ -445,9 +471,10 @@ func (c *Catalog) items(ctx context.Context, parent string, tc titleCtx, where, 
 	q := `SELECT i.id, i.library_id, i.dir_id, i.path, i.name, i.mime, i.kind, i.size, i.mtime, i.title, i.year,
 		i.season, i.episode, i.episode_title, i.duration_ms, i.width, i.height, s.name,
 		i.orientation, i.taken_at, i.artist, al.title, g.name, i.track, i.has_art,
-		i.container, i.video_codec, i.audio_codec, i.pix_fmt, i.audio_channels, i.subtitle
+		i.container, i.video_codec, i.audio_codec, i.pix_fmt, i.audio_channels, i.subtitle,
+		m.id, m.title, m.year, m.overview, m.genres, m.poster
 		FROM item i LEFT JOIN show s ON s.id = i.show_id LEFT JOIN album al ON al.id = i.album_id
-		LEFT JOIN genre g ON g.id = i.genre_id WHERE ` + where + ` ORDER BY ` + order + ` LIMIT ? OFFSET ?`
+		LEFT JOIN genre g ON g.id = i.genre_id ` + movieMeta + ` WHERE ` + where + ` ORDER BY ` + order + ` LIMIT ? OFFSET ?`
 	rows, err := c.st.DB.QueryContext(ctx, q, append(args, limit, start)...)
 	if err != nil {
 		return nil, err
@@ -468,11 +495,16 @@ func (c *Catalog) items(ctx context.Context, parent string, tc titleCtx, where, 
 			hasArt                  bool
 			cont, vc, ac, pix, sub  sql.NullString
 			channels                sql.NullInt64
+			metaID, metaYear        sql.NullInt64
+			metaTitle, overview     sql.NullString
+			metaGenres              sql.NullString
+			poster                  sql.NullBool
 		)
 		if err := rows.Scan(&id, &libID, &dirID, &o.Path, &name, &mime, &kind, &o.Size, &mtime, &o.Title, &year,
 			&season, &episode, &epTitle, &dur, &w, &h, &show,
 			&orient, &taken, &artist, &album, &genre, &track, &hasArt,
-			&cont, &vc, &ac, &pix, &channels, &sub); err != nil {
+			&cont, &vc, &ac, &pix, &channels, &sub,
+			&metaID, &metaTitle, &metaYear, &overview, &metaGenres, &poster); err != nil {
 			return nil, err
 		}
 		o.Container, o.VideoCodec, o.AudioCodec, o.PixFmt = cont.String, vc.String, ac.String, pix.String
@@ -484,6 +516,18 @@ func (c *Catalog) items(ctx context.Context, parent string, tc titleCtx, where, 
 		}
 		if hasArt || (dlna.Kind(kind) == dlna.Video && c.VideoThumbs) {
 			o.ArtPath = ThumbPath(id, "tn")
+		}
+		if metaTitle.Valid {
+			o.Title, o.Description = metaTitle.String, overview.String
+			if !year.Valid {
+				year = metaYear
+			}
+			if o.Genre == "" {
+				o.Genre = metaGenres.String
+			}
+			if poster.Bool {
+				o.ArtPath = PosterPath(metaID.Int64, "tn")
+			}
 		}
 		o.ID = "I" + strconv.FormatInt(id, 10)
 		o.ParentID = parent
@@ -606,6 +650,11 @@ func page(objs []Object, start, count int) []Object {
 
 // NaturalCompare orders strings case-insensitively with numbers compared by value.
 func NaturalCompare(a, b string) int { return strings.Compare(SortKey(a), SortKey(b)) }
+
+// PosterPath is the URL path of a cached movie or show poster: size tn (DLNA) or sm (web).
+func PosterPath(metaID int64, size string) string {
+	return "/poster/" + strconv.FormatInt(metaID, 10) + "/" + size + ".jpg"
+}
 
 // ThumbPath is the URL path of a generated JPEG for an item: size tn, sm or lrg.
 func ThumbPath(itemID int64, size string) string {

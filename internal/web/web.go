@@ -21,6 +21,7 @@ import (
 	"github.com/novami/minor-dlna/internal/dlna"
 	"github.com/novami/minor-dlna/internal/library"
 	"github.com/novami/minor-dlna/internal/macos"
+	"github.com/novami/minor-dlna/internal/metadata"
 	"github.com/novami/minor-dlna/internal/update"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -36,6 +37,7 @@ type Server struct {
 	Version string
 	FFmpeg  bool
 	Updates *update.Manager
+	Meta    *metadata.Service
 	Restart func() // apply a saved config
 	Quit    func()
 }
@@ -46,7 +48,12 @@ func (s *Server) Register(mux *http.ServeMux) {
 		w.Header().Set("Cache-Control", "no-store")
 		http.ServeFileFS(w, r, static, "index.html")
 	})))
-	mux.Handle("GET /static/", s.public(http.StripPrefix("/static/", http.FileServerFS(static))))
+	// Embedded files have no modification time; without no-cache a browser keeps the old UI after an update.
+	files := http.StripPrefix("/static/", http.FileServerFS(static))
+	mux.Handle("GET /static/", s.public(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		files.ServeHTTP(w, r)
+	})))
 	mux.Handle("POST /api/login", s.public(http.HandlerFunc(s.login)))
 	mux.Handle("POST /api/logout", s.public(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sessions.drop(w, r)
@@ -65,6 +72,9 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.Handle("GET /api/storage", s.local(http.HandlerFunc(s.storage)))
 	mux.Handle("POST /api/storage/clean", s.local(http.HandlerFunc(s.cleanStorage)))
 	mux.Handle("GET /api/browse", s.local(http.HandlerFunc(s.browse)))
+	mux.Handle("GET /api/meta", s.local(http.HandlerFunc(s.metaList)))
+	mux.Handle("GET /api/meta/search", s.local(http.HandlerFunc(s.metaSearch)))
+	mux.Handle("POST /api/meta/set", s.local(http.HandlerFunc(s.metaSet)))
 	mux.Handle("GET /api/update", s.local(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, s.Updates.State())
 	})))
@@ -168,6 +178,8 @@ type stateJSON struct {
 	AutoUpdate   bool             `json:"auto_update"`
 	MenuBar      bool             `json:"menubar"`
 	InApp        bool             `json:"in_app"`
+	Metadata     bool             `json:"metadata"`
+	TMDb         bool             `json:"tmdb"`
 	HWAccel      string           `json:"hwaccel"`
 	Suggestions  []libraryJSON    `json:"suggestions"`
 	Home         string           `json:"home"`
@@ -189,6 +201,7 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 		FFmpeg: s.FFmpeg, Scanning: s.Scanner.Scanning(), Progress: s.Scanner.Progress(), Addresses: lanAddresses(s.Cfg.Port),
 		Libraries: libs, IsLocal: isLocal(r), Remote: s.remoteEnabled(), DTS: s.Cfg.Transcode.DTSEnabled(), AutoUpdate: s.Cfg.Updates.AutoEnabled(), HWAccel: s.Cfg.Transcode.HWAccel,
 		Suggestions: suggestions(), Home: homeDir(), MenuBar: s.Cfg.MenuBarEnabled(), InApp: inApp(),
+		Metadata: s.Cfg.Metadata.On(), TMDb: s.Cfg.Metadata.TMDbToken != "",
 	})
 }
 
@@ -223,13 +236,15 @@ type configRequest struct {
 		Type  config.LibraryType `json:"type"`
 		Paths []string           `json:"paths"`
 	} `json:"libraries"`
-	DTS        bool   `json:"dts"`
-	HWAccel    string `json:"hwaccel"`
-	Autostart  bool   `json:"autostart"`
-	AutoUpdate *bool  `json:"auto_update"`
-	Remote     *bool  `json:"remote"`
-	MenuBar    *bool  `json:"menubar"`
-	Password   string `json:"password"` // new password for remote access, empty = keep
+	DTS        bool    `json:"dts"`
+	HWAccel    string  `json:"hwaccel"`
+	Autostart  bool    `json:"autostart"`
+	AutoUpdate *bool   `json:"auto_update"`
+	Remote     *bool   `json:"remote"`
+	MenuBar    *bool   `json:"menubar"`
+	Metadata   *bool   `json:"metadata"`
+	TMDbToken  *string `json:"tmdb_token"` // nil = keep, "" = remove
+	Password   string  `json:"password"`   // new password for remote access, empty = keep
 }
 
 func (s *Server) saveConfig(w http.ResponseWriter, r *http.Request) {
@@ -284,6 +299,13 @@ func (s *Server) saveConfig(w http.ResponseWriter, r *http.Request) {
 			writeError(w, "Pro přístup z jiných zařízení nastavte heslo.")
 			return
 		}
+	}
+	if req.Metadata != nil {
+		on := *req.Metadata
+		next.Metadata.Enabled = &on
+	}
+	if req.TMDbToken != nil {
+		next.Metadata.TMDbToken = strings.TrimSpace(*req.TMDbToken)
 	}
 	if req.AutoUpdate != nil {
 		auto := *req.AutoUpdate
@@ -402,6 +424,8 @@ type browseItem struct {
 	Art   string `json:"art,omitempty"`   // card image
 	Large string `json:"large,omitempty"` // full-size photo
 	Info  string `json:"info,omitempty"`
+	// Poster marks a movie or show poster (portrait) rather than a video frame.
+	Poster bool `json:"poster,omitempty"`
 }
 
 // browse lists the same tree the TV sees, with thumbnails for the web library view.
@@ -428,6 +452,7 @@ func (s *Server) browse(w http.ResponseWriter, r *http.Request) {
 	items := make([]browseItem, 0, len(objs))
 	for _, o := range objs {
 		it := browseItem{ID: o.ID, Title: o.Title, Dir: o.IsDir, Count: o.ChildCount}
+		it.Poster = strings.HasPrefix(o.ArtPath, "/poster/")
 		if o.ArtPath != "" {
 			// Cards are larger than DLNA thumbnails: use the 640 px rendition.
 			it.Art = strings.Replace(o.ArtPath, "/tn.jpg", "/sm.jpg", 1)

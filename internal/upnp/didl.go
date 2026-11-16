@@ -85,6 +85,14 @@ func writeItem(b *strings.Builder, o library.Object, baseURL string, opts Render
 			b.WriteString(`<upnp:originalTrackNumber>` + strconv.Itoa(o.Track) + `</upnp:originalTrackNumber>`)
 		}
 	}
+	if o.Format.Kind == dlna.Video {
+		if o.Genre != "" {
+			b.WriteString(`<upnp:genre>` + esc(o.Genre) + `</upnp:genre>`)
+		}
+		if o.Description != "" {
+			b.WriteString(`<dc:description>` + esc(o.Description) + `</dc:description>`)
+		}
+	}
 	writeArt(b, o, baseURL)
 	subURL := ""
 	if o.Subtitle != "" {

@@ -24,6 +24,7 @@ import (
 	"github.com/novami/minor-dlna/internal/library"
 	"github.com/novami/minor-dlna/internal/macos"
 	"github.com/novami/minor-dlna/internal/media"
+	"github.com/novami/minor-dlna/internal/metadata"
 	"github.com/novami/minor-dlna/internal/ssdp"
 	"github.com/novami/minor-dlna/internal/store"
 	"github.com/novami/minor-dlna/internal/stream"
@@ -269,7 +270,15 @@ func run(parent context.Context, quit context.CancelFunc, cfgPath string, openBr
 		probe = filepath.Join(filepath.Dir(cfg.Transcode.FFmpeg), "ffprobe")
 	}
 	scanner := library.NewScanner(cat, media.NewProber(probe))
-	scanner.OnChange = func(uint32) { dev.NotifyChange() }
+	// Posters live outside cache/: the index refers to them and storage cleanup empties cache/.
+	meta := metadata.New(st, filepath.Join(filepath.Dir(cfgPath), "posters"), cfg.Metadata)
+	meta.OnChange = func() {
+		if _, err := st.BumpUpdateID(ctx); err == nil {
+			dev.NotifyChange()
+		}
+	}
+	go meta.Run(ctx)
+	scanner.OnChange = func(uint32) { dev.NotifyChange(); meta.Kick() }
 	scanner.OnRemove = th.Purge
 	scanDone := make(chan struct{})
 	go func() { scanner.Run(ctx); close(scanDone) }()
@@ -279,6 +288,7 @@ func run(parent context.Context, quit context.CancelFunc, cfgPath string, openBr
 	dev.Register(mux)
 	mux.Handle(stream.Prefix, stream.Handler(cat))
 	mux.Handle("/thumb/", th)
+	mux.Handle("/poster/", meta)
 	mux.Handle(transcode.Prefix, tc)
 	mux.Handle(stream.SubsPrefix, stream.SubsHandler(cat))
 	appPath, _ := macos.AppBundle()
@@ -293,7 +303,7 @@ func run(parent context.Context, quit context.CancelFunc, cfgPath string, openBr
 	live.Store(&current{cfg: cfg, scanner: scanner, upd: upd, tc: tc})
 	defer live.Store(nil)
 	ui := &web.Server{
-		Cfg: cfg, CfgPath: cfgPath, Cat: cat, Scanner: scanner, Version: version.Version, FFmpeg: ffmpeg != "", Updates: upd,
+		Cfg: cfg, CfgPath: cfgPath, Cat: cat, Scanner: scanner, Version: version.Version, FFmpeg: ffmpeg != "", Updates: upd, Meta: meta,
 		Restart: func() { restart.Store(true); cancel() },
 		Quit:    quit,
 	}

@@ -102,6 +102,24 @@ func TestCatalogScanAndViews(t *testing.T) {
 	eps, _, _ := cat.Children(ctx, seasons[0].ID, 0, 0)
 	eq(t, eps, "02. Druhý", "10.")
 
+	// Matched metadata renames and re-sorts a movie, adds its poster; a show gets its matched name.
+	if _, err := st.DB.ExecContext(ctx, `INSERT INTO meta_match (kind, query, status, title, sort_title, year, poster) VALUES
+		('movies', 'Zeta|2001', 1, 'Astra', 'astra', 2001, 1), ('movies', 'Alfa|2019', 3, 'Ignored', 'a', 2019, 0),
+		('shows', 'Show A|', 2, 'Seriál A', 'serial a', NULL, 0)`); err != nil {
+		t.Fatal(err)
+	}
+	all, _, _ = cat.Children(ctx, mid+"/all", 0, 0)
+	eq(t, all, "Alfa (2019)", "Astra (2001)", "Beta (2019)")
+	if all[1].ArtPath != PosterPath(1, "tn") {
+		t.Fatalf("poster art %q", all[1].ArtPath)
+	}
+	if sl, _, _ := cat.Children(ctx, sid+"/shows", 0, 0); titles(sl)[0] != "Seriál A" {
+		t.Fatalf("show title %q", titles(sl))
+	}
+	if _, err := st.DB.ExecContext(ctx, `DELETE FROM meta_match`); err != nil {
+		t.Fatal(err)
+	}
+
 	// Media URL resolves to the file.
 	item, err := cat.ResolveMedia(ctx, eps[0].MediaPath[len("/media/"):])
 	if err != nil || filepath.Base(item.Path) != "S01E02 Druhý.mkv" {

@@ -82,9 +82,10 @@ func (c *client) getJSON(ctx context.Context, u string, header http.Header, v an
 }
 
 type entity struct {
-	Labels    map[string]struct{ Value string } `json:"labels"`
-	Sitelinks map[string]struct{ Title string } `json:"sitelinks"`
-	Claims    map[string][]struct {
+	Labels       map[string]struct{ Value string } `json:"labels"`
+	Descriptions map[string]struct{ Value string } `json:"descriptions"`
+	Sitelinks    map[string]struct{ Title string } `json:"sitelinks"`
+	Claims       map[string][]struct {
 		Mainsnak struct {
 			Datavalue struct {
 				Value json.RawMessage `json:"value"`
@@ -204,7 +205,7 @@ func (c *client) search(ctx context.Context, k Kind, title string) ([]Candidate,
 			return nil, nil
 		}
 	}
-	ents, err := c.entities(ctx, ids, "labels|claims")
+	ents, err := c.entities(ctx, ids, "labels|descriptions|claims")
 	if err != nil {
 		return nil, err
 	}
@@ -215,6 +216,9 @@ func (c *client) search(ctx context.Context, k Kind, title string) ([]Candidate,
 			continue
 		}
 		cd := Candidate{ID: id, Title: e.label(), Description: desc[id], Year: e.year()}
+		if cd.Description == "" {
+			cd.Description = e.Descriptions["cs"].Value
+		}
 		for _, l := range e.Labels {
 			cd.matched = append(cd.matched, l.Value)
 		}

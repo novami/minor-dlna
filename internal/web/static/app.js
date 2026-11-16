@@ -56,11 +56,13 @@ async function load() {
     autostart: state.setup_needed ? true : state.autostart,
     auto_update: state.auto_update,
     menubar: state.menubar,
+    metadata: state.metadata,
+    tmdb_token: null, // null = keep the saved token
     remote: state.remote,
     password: "",
   };
   render();
-  if (!state.setup_needed) { loadUpdate(); loadStorage(); }
+  if (!state.setup_needed) { loadUpdate(); loadStorage(); loadMeta(); }
 }
 
 function header() {
@@ -407,7 +409,7 @@ function libraryView() {
   if (!d) return `<div class="crumbs">${crumbs}</div><p class="hint">Načítám…</p>`;
   if (!d.items.length) return `<div class="crumbs">${crumbs}</div><section class="card"><p class="hint">Tady zatím nic není.</p></section>`;
   return `<div class="crumbs">${crumbs}</div>
-    <div class="grid ${d.items.every((i) => i.kind === "photo") ? "photos" : ""}">${d.items.map(card).join("")}</div>
+    <div class="grid ${d.items.every((i) => i.kind === "photo") ? "photos" : d.items.some((i) => i.poster) ? "posters" : ""}">${d.items.map(card).join("")}</div>
     ${d.items.length < d.total ? `<div class="actions"><button onclick="more(this)">Načíst další (${d.total - d.items.length})</button></div>` : ""}`;
 }
 
@@ -503,13 +505,118 @@ function settings() {
       ${toggle("autostart", "Spouštět po přihlášení", "Server poběží na pozadí, TV ho najde i bez otevírání aplikace.")}
       ${toggle("auto_update", "Automatické aktualizace", "Nové verze se nainstalují samy, nikdy během přehrávání.")}
       ${state.in_app ? toggle("menubar", "Ikona v řádku nabídek", "Ukazuje, že server běží, a nabízí rychlé volby: správa, knihovna, prohledání, aktualizace, ukončení.") : ""}
+      ${toggle("metadata", "Názvy, popisy a plakáty filmů", "Hledá filmy a seriály na Wikidatech a Wikipedii (posílá tam jejich názvy). Bez klíče a zdarma.")}
+      ${draft.metadata ? tmdbField() : ""}
       ${toggle("remote", "Přístup z jiných zařízení", "Správa chráněná heslem. " + remoteHint)}
       ${draft.remote ? `<label class="field">${state.remote ? "Nové heslo (prázdné = ponechat)" : "Heslo (aspoň 8 znaků)"}</label>
         <input type="password" autocomplete="new-password" value="${esc(draft.password)}" oninput="draft.password=this.value">` : ""}
       <div class="error" id="error"></div>
       <div class="actions"><button class="primary" onclick="save(this)">Uložit</button></div>
-    </section>`;
+    </section>
+    ${state.metadata ? `<section class="card" id="meta">${metaCard()}</section>` : ""}`;
 }
+
+function tmdbField() {
+  if (draft.tmdb_token === "" && state.tmdb) {
+    return `<p class="hint">TMDb token se po uložení odebere. <button class="link" onclick="draft.tmdb_token=null;render()">Ponechat</button></p>`;
+  }
+  return `<label class="field">TMDb token (nepovinné – víc plakátů a delší české popisy)</label>
+    <input type="password" autocomplete="off" placeholder="${state.tmdb ? "Token je uložen, prázdné = ponechat" : "API Read Access Token z themoviedb.org"}"
+      value="${esc(draft.tmdb_token || "")}" oninput="draft.tmdb_token=this.value||null">
+    ${state.tmdb ? `<button class="link" onclick="draft.tmdb_token='';render()">Odebrat token</button>` : ""}`;
+}
+
+// ---------- movie metadata ----------
+
+let meta = null;       // { items, tmdb }
+let metaEdit = null;   // { id, q, results, busy }
+
+function metaStatus(e) {
+  if (e.status === 3) return `<small>bez metadat</small>`;
+  if (e.status === 0) return e.checked ? `<small class="warn">nenalezeno</small>` : `<small>hledám…</small>`;
+  return `${esc(e.title)}${e.year ? ` (${e.year})` : ""}${e.status === 2 ? ` <small>ručně</small>` : ""}`;
+}
+
+function metaCard() {
+  const head = `<h2>Metadata filmů a seriálů</h2>
+    <p class="hint">Údaje z <a href="https://www.wikidata.org" target="_blank" rel="noopener">Wikidat</a> (CC0) a <a href="https://cs.wikipedia.org" target="_blank" rel="noopener">Wikipedie</a> (CC BY-SA)${meta?.tmdb ? `, plakáty a popisy z <a href="https://www.themoviedb.org" target="_blank" rel="noopener">TMDb</a>. Tento produkt používá TMDb API, ale není TMDb podporován ani certifikován` : ""}.</p>`;
+  if (!meta) return head + `<p class="hint">Načítám…</p>`;
+  if (!meta.items.length) return head + `<p class="hint">Zatím tu nejsou žádné filmy ani seriály.</p>`;
+  const missing = meta.items.filter((e) => e.status === 0 && e.checked).length;
+  return head + (missing ? `<p class="hint">${missing} ${missing === 1 ? "titul se nepodařilo" : "titulů se nepodařilo"} najít automaticky – vyberte ho ručně.</p>` : "") +
+    `<div class="meta-list">${meta.items.map((e) => `
+      <div class="meta-row">
+        ${e.poster ? `<img src="${esc(e.poster)}" alt="">` : `<div class="ph">${e.kind === "shows" ? "📺" : "🎬"}</div>`}
+        <div class="meta-text"><b>${metaStatus(e)}</b><small>${esc(e.file_title)}${e.file_year ? ` (${e.file_year})` : ""}</small></div>
+        <button class="link" onclick="metaOpen(${e.id})">Změnit</button>
+      </div>
+      ${metaEdit && metaEdit.id === e.id ? metaEditor(e) : ""}`).join("")}
+    </div>`;
+}
+
+function metaEditor(e) {
+  const r = metaEdit.results;
+  return `<div class="meta-edit">
+    <form class="meta-search" onsubmit="metaSearch(event)">
+      <input type="text" id="meta-q" value="${esc(metaEdit.q)}" placeholder="Název filmu nebo seriálu">
+      <button ${metaEdit.busy ? "disabled" : ""}>Hledat</button>
+    </form>
+    ${r === null ? "" : r.length ? r.map((c) => `
+      <button class="meta-cand" onclick="metaSet(${e.id}, '${esc(c.id)}')" ${metaEdit.busy ? "disabled" : ""}>
+        <b>${esc(c.title)}${c.year ? ` (${c.year})` : ""}</b><small>${esc(c.description || "")}</small></button>`).join("")
+      : `<p class="hint">Nic nenalezeno, zkuste jiný název (třeba originální).</p>`}
+    <div class="actions">
+      ${e.status !== 0 ? `<button class="link left" onclick="metaRematch(${e.id})">Vyhledat znovu automaticky</button>` : ""}
+      <button class="link" onclick="metaSet(${e.id}, '')">Bez metadat</button>
+      <button onclick="metaEdit=null;metaRender()">Zavřít</button>
+    </div>
+  </div>`;
+}
+
+function metaRender() {
+  const el = document.getElementById("meta");
+  if (el) el.innerHTML = metaCard();
+}
+
+async function loadMeta() {
+  if (!state.metadata) return;
+  try { meta = await api("/api/meta"); } catch (_) { return; }
+  metaRender();
+}
+
+window.metaOpen = (id) => {
+  const e = meta.items.find((x) => x.id === id);
+  metaEdit = { id, q: e.file_title, results: null, busy: false };
+  metaRender();
+  document.getElementById("meta-q")?.focus();
+};
+
+window.metaSearch = async (ev) => {
+  ev.preventDefault();
+  metaEdit.q = document.getElementById("meta-q").value.trim();
+  if (!metaEdit.q) return;
+  metaEdit.busy = true; metaRender();
+  try {
+    metaEdit.results = await api("/api/meta/search?id=" + metaEdit.id + "&q=" + encodeURIComponent(metaEdit.q));
+  } catch (e) { alert(e.message); }
+  metaEdit.busy = false; metaRender();
+};
+
+window.metaSet = async (id, wikidata) => {
+  metaEdit.busy = true; metaRender();
+  try {
+    await api("/api/meta/set", { id, wikidata });
+    metaEdit = null;
+  } catch (e) { alert(e.message); metaEdit.busy = false; }
+  loadMeta();
+};
+
+window.metaRematch = async (id) => {
+  try { await api("/api/meta/set", { id, rematch: true }); } catch (e) { return alert(e.message); }
+  metaEdit = null;
+  loadMeta();
+  setTimeout(loadMeta, 5000);
+};
 
 // Refresh counts while scanning, without touching unsaved edits.
 setInterval(async () => {

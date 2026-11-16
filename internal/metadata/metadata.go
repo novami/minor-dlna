@@ -75,14 +75,14 @@ func (s *Service) Run(ctx context.Context) {
 	t := time.NewTicker(passInterval)
 	defer t.Stop()
 	for {
+		if err := s.pass(ctx); err != nil && ctx.Err() == nil {
+			slog.Warn("metadata lookup stopped", "err", err)
+		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-s.kick:
 		case <-t.C:
-		}
-		if err := s.pass(ctx); err != nil && ctx.Err() == nil {
-			slog.Warn("metadata lookup stopped", "err", err)
 		}
 	}
 }
@@ -318,7 +318,7 @@ func (s *Service) Entries(ctx context.Context) ([]Entry, error) {
 		e.FileTitle, e.FileYear = splitQuery(q)
 		e.Checked = checked > 0
 		if poster {
-			e.Poster = PosterPath(e.ID, "sm")
+			e.Poster = library.PosterPath(e.ID, "sm")
 		}
 		out = append(out, e)
 	}
@@ -348,6 +348,9 @@ func (s *Service) Set(ctx context.Context, id int64, qid string) error {
 	}
 	var d Details
 	status := StatusNone
+	if qid != "" && !validQID(qid) {
+		return errNotFound
+	}
 	if qid != "" {
 		var err error
 		if d, err = s.c.details(ctx, k, qid); err != nil {
@@ -374,11 +377,6 @@ func (s *Service) Rematch(ctx context.Context, id int64) error {
 }
 
 // ---------- posters ----------
-
-// PosterPath is the URL path of a cached poster: size tn (DLNA) or sm (web).
-func PosterPath(id int64, size string) string {
-	return "/poster/" + strconv.FormatInt(id, 10) + "/" + size + ".jpg"
-}
 
 func (s *Service) posterFile(id int64, size string) string {
 	return filepath.Join(s.dir, strconv.FormatInt(id, 10)+"-"+size+".jpg")
@@ -466,4 +464,12 @@ func nullStr(s string) sql.NullString { return sql.NullString{String: s, Valid: 
 func nullInt(n int) sql.NullInt64     { return sql.NullInt64{Int64: int64(n), Valid: n > 0} }
 func nullFloat(f float64) sql.NullFloat64 {
 	return sql.NullFloat64{Float64: f, Valid: f > 0}
+}
+
+func validQID(s string) bool {
+	if len(s) < 2 || s[0] != 'Q' {
+		return false
+	}
+	_, err := strconv.ParseUint(s[1:], 10, 64)
+	return err == nil
 }
