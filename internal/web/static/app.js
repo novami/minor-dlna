@@ -445,7 +445,10 @@ window.openItem = (i) => {
     openFolder(it.id);
   } else if (it.kind === "photo" && it.large) {
     lightbox(i);
-  } else if (it.kind === "video" || it.kind === "audio") {
+  } else if (it.kind === "audio") {
+    const tracks = browse.data.items.filter((t) => t.kind === "audio");
+    musicPlay(tracks, tracks.indexOf(it));
+  } else if (it.kind === "video") {
     tvSheet(it);
   }
 };

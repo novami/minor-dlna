@@ -109,11 +109,17 @@ function tvRenderSheet() {
       <div><h2>${esc(it.title)}</h2>${it.info ? `<small>${esc(it.info)}</small>` : ""}${progress}</div>
     </div>
     ${it.desc ? `<p class="desc">${esc(it.desc)}</p>` : ""}
+    <div class="actions here">
+      ${resume ? `<button onclick="webPlay(0)">Od začátku</button>
+        <button class="primary" onclick="webPlay(${it.position_ms})">Pokračovat zde od ${fmtTime(Math.max(it.position_ms - 5000, 0))}</button>`
+      : `<button class="primary" onclick="webPlay(0)">Přehrát zde</button>`}
+    </div>
+    <h3 class="sheet-sub">Na televizi</h3>
     ${picker}
     <div class="actions">
       <button class="link left" onclick="tvSearch()" ${tv.searching ? "disabled" : ""}>${tv.searching ? "Hledám…" : "Hledat znovu"}</button>
       ${resume ? `<button onclick="tvPlay(0)" ${can ? "" : "disabled"}>Od začátku</button>
-        <button class="primary" onclick="tvPlay(${it.position_ms})" ${can ? "" : "disabled"}>Pokračovat od ${fmtTime(Math.max(it.position_ms - 5000, 0))}</button>`
+        <button class="primary" onclick="tvPlay(${it.position_ms})" ${can ? "" : "disabled"}>Pokračovat na TV</button>`
       : `<button class="primary" onclick="tvPlay(0)" ${can ? "" : "disabled"}>Přehrát na TV</button>`}
     </div>
     <div class="error">${esc(error)}</div>

@@ -316,6 +316,7 @@ func run(parent context.Context, quit context.CancelFunc, cfgPath string, openBr
 	go func() { tv.Run(ctx); close(tvDone) }()
 	ui := &web.Server{
 		Cfg: cfg, CfgPath: cfgPath, Cat: cat, Scanner: scanner, Version: version.Version, FFmpeg: ffmpeg != "", Updates: upd, Meta: meta, TV: tv,
+		Transcode: tc, HLS: transcode.NewHLS(tc, filepath.Join(filepath.Dir(cfgPath), "cache", "hls")),
 		Restart: func() { restart.Store(true); cancel() },
 		Quit:    quit,
 	}

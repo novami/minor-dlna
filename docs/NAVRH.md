@@ -113,7 +113,7 @@ internal/version/            verze vložená při buildu (-ldflags)
 | Video OK, audio ne (TrueHD, DTS-HD MA u řad bez DTS) | `-c:v copy`, audio → EAC3/AC3 |
 | Nepodporovaný kontejner (WMV, starší AVI) | Remux / transkód do MPEG-TS |
 | Nepodporované video | H.264/HEVC přes `h264_videotoolbox` / `hevc_videotoolbox` |
-| Webový prohlížeč | HLS (fMP4 segmenty) s kopií videa, kde to jde; jinak transkód |
+| Webový prohlížeč | MP4 (H.264/HEVC + AAC/MP3) a MP3/FLAC přímo; jinak fragmentované MP4 s kopií videa, kde to jde, Safari HLS (fMP4 segmenty). Posun = nový stream od klíčového snímku před cílem (`/api/play/start`), titulky WebVTT posunuté o začátek |
 
 **Profil LG webOS 22+ (výchozí, upravitelný v YAML):**
 - Kontejnery: MKV, MP4, MOV, TS, AVI, WebM.
@@ -124,7 +124,7 @@ internal/version/            verze vložená při buildu (-ldflags)
 - Zvuk: >2 kanály → AC3 640k 5.1, jinak AAC 192k. Video → H.264 (VideoToolbox, nebo libx264 při `hwaccel: none`), max. 1080p. VP9/AV1 se při nutném remuxu převádí (MPEG-TS je neunese). Hudba ALAC/APE/WMA → FLAC.
 - Seek u převáděných streamů jen časový (`TimeSeekRange.dlna.org`, `OP=10`); bajtové rozsahy se nenabízejí, protože velikost výstupu není známá. HDR → SDR tone mapping zatím není.
 
-Správa: jeden ffmpeg proces na stream, ukončení při odpojení (context cancel), limit souběžných transkódů (výchozí 2, při plném limitu čeká 5 s – TV se často hned znovu připojuje), HLS segmenty v dočasné složce s úklidem (fáze 8).
+Správa: jeden ffmpeg proces na stream, ukončení při odpojení (context cancel), limit souběžných transkódů (výchozí 2, při plném limitu čeká 5 s – TV se často hned znovu připojuje), HLS segmenty v `cache/hls` (čtení max. 2× rychlostí), smazání při zastavení nebo po 2 min bez dotazu.
 
 ## 6. Knihovna a metadata
 
@@ -163,7 +163,7 @@ Správa: jeden ffmpeg proces na stream, ukončení při odpojení (context cance
 
 ## 8. Webové UI
 
-- `http://<mac>.local:8200/` – `html/template` + htmx, hls.js pro prohlížeče bez nativního HLS (Safari má nativní), vše v `embed.FS`, bez Node buildu.
+- `http://<mac>.local:8200/` – statické HTML/JS v `embed.FS`, bez Node buildu a bez hls.js (HLS jen pro Safari, který ho má nativně).
 - **Uživatelská část:** Domů (Pokračovat, Naposledy přidané), knihovny s plakáty, detail (popis, obsazení, stopy, titulky), tlačítka *Přehrát zde* / *Přehrát na TV* (výběr TV), ovladač TV (pauza, seek, hlasitost), fotky jako mřížka + prohlížeč, hudba s přehrávačem a frontou.
 - **Admin část:** knihovny (složky, typ, rescan), metadata (zapnutí, TMDb klíč, nespárované položky, ruční párování), zařízení (TV, profily, WoL), aktivní streamy, nastavení, logy.
 - Ochrana: jedno heslo (bcrypt) + session cookie; DLNA endpointy bez hesla (protokol to neumí), volitelný allowlist podsítí.

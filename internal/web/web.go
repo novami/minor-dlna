@@ -23,6 +23,7 @@ import (
 	"github.com/novami/minor-dlna/internal/macos"
 	"github.com/novami/minor-dlna/internal/metadata"
 	"github.com/novami/minor-dlna/internal/renderer"
+	"github.com/novami/minor-dlna/internal/transcode"
 	"github.com/novami/minor-dlna/internal/update"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -31,17 +32,19 @@ import (
 var staticFS embed.FS
 
 type Server struct {
-	Cfg     *config.Config
-	CfgPath string
-	Cat     *library.Catalog
-	Scanner *library.Scanner
-	Version string
-	FFmpeg  bool
-	Updates *update.Manager
-	Meta    *metadata.Service
-	TV      *renderer.Controller
-	Restart func() // apply a saved config
-	Quit    func()
+	Cfg       *config.Config
+	CfgPath   string
+	Cat       *library.Catalog
+	Scanner   *library.Scanner
+	Version   string
+	FFmpeg    bool
+	Updates   *update.Manager
+	Meta      *metadata.Service
+	TV        *renderer.Controller
+	Transcode *transcode.Service
+	HLS       *transcode.HLS
+	Restart   func() // apply a saved config
+	Quit      func()
 }
 
 func (s *Server) Register(mux *http.ServeMux) {
@@ -78,6 +81,7 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.Handle("GET /api/meta/search", s.local(http.HandlerFunc(s.metaSearch)))
 	mux.Handle("POST /api/meta/set", s.local(http.HandlerFunc(s.metaSet)))
 	s.registerTV(mux)
+	s.registerPlayer(mux)
 	mux.Handle("GET /api/update", s.local(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, s.Updates.State())
 	})))

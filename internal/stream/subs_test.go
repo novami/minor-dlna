@@ -11,3 +11,11 @@ func TestToUTF8(t *testing.T) {
 		t.Fatalf("got %q", got)
 	}
 }
+
+func TestSRTToVTT(t *testing.T) {
+	srt := "1\r\n00:00:05,000 --> 00:00:08,500\r\nPryč\r\n\r\n2\r\n00:01:00,000 --> 00:01:02,250\r\nDva\r\nřádky\r\n"
+	want := "WEBVTT\n\n00:00:50.000 --> 00:00:52.250\nDva\nřádky\n\n"
+	if got := string(SRTToVTT([]byte(srt), 10)); got != want {
+		t.Fatalf("got %q", got)
+	}
+}

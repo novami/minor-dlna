@@ -54,3 +54,23 @@ func TestDetect(t *testing.T) {
 		t.Error("generic expected")
 	}
 }
+
+func TestDecideBrowser(t *testing.T) {
+	for _, c := range []struct {
+		m    Media
+		hevc bool
+		want Plan
+	}{
+		{Media{Container: "mov,mp4,m4a", VideoCodec: "h264", AudioCodec: "aac"}, false, Plan{}},
+		{Media{Container: "matroska,webm", VideoCodec: "h264", AudioCodec: "ac3"}, false, Plan{"copy", "aac"}},
+		{Media{Container: "mov,mp4", VideoCodec: "hevc", AudioCodec: "aac"}, false, Plan{"h264", "copy"}},
+		{Media{Container: "mov,mp4", VideoCodec: "hevc", AudioCodec: "aac"}, true, Plan{}},
+		{Media{Container: "matroska", VideoCodec: "h264", PixFmt: "yuv420p10le"}, false, Plan{Video: "h264"}},
+		{Media{Audio: true, Container: "flac", AudioCodec: "flac"}, false, Plan{}},
+		{Media{Audio: true, Container: "mov,mp4,m4a", AudioCodec: "alac"}, false, Plan{Audio: "aac"}},
+	} {
+		if got := DecideBrowser(c.m, c.hevc); got != c.want {
+			t.Errorf("%+v hevc=%v: %+v, want %+v", c.m, c.hevc, got, c.want)
+		}
+	}
+}

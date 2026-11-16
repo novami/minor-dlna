@@ -113,19 +113,18 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A player often reconnects immediately; give the previous ffmpeg a moment to exit.
-	wait, cancel := context.WithTimeout(r.Context(), 5*time.Second)
-	defer cancel()
-	select {
-	case s.slots <- struct{}{}:
-		defer func() { <-s.slots }()
-	case <-wait.Done():
-		slog.Warn("transcode refused, all sessions busy", "file", o.Title)
+	s.pipe(w, r, o, Args(plan, o.Path, start, s.hwaccel), plan.Key(), start)
+}
+
+// pipe runs ffmpeg and streams its output; it answers 503 when all transcoding slots stay busy.
+func (s *Service) pipe(w http.ResponseWriter, r *http.Request, o library.Object, args []string, label string, start float64) {
+	release, ok := s.acquire(r.Context(), o.Title)
+	if !ok {
 		http.Error(w, "too many transcoding sessions", http.StatusServiceUnavailable)
 		return
 	}
+	defer release()
 
-	args := Args(plan, o.Path, start, s.hwaccel)
 	cmd := exec.CommandContext(r.Context(), s.ffmpeg, args...)
 	var stderr tailBuffer
 	cmd.Stderr = &stderr
@@ -139,19 +138,14 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "transcoder failed", http.StatusInternalServerError)
 		return
 	}
-	s.mu.Lock()
-	s.active++
-	s.mu.Unlock()
-	slog.Info("transcode started", "file", o.Title, "plan", plan.Key(), "start", start, "remote", r.RemoteAddr)
+	s.track(1)
+	defer s.track(-1)
+	slog.Info("transcode started", "file", o.Title, "plan", label, "start", start, "remote", r.RemoteAddr)
 	began := time.Now()
 
 	w.WriteHeader(http.StatusOK)
 	n, copyErr := io.Copy(flushWriter{w}, out)
 	waitErr := cmd.Wait()
-
-	s.mu.Lock()
-	s.active--
-	s.mu.Unlock()
 	switch {
 	case r.Context().Err() != nil:
 		slog.Info("transcode stopped by client", "file", o.Title, "sent_mb", n>>20, "took", time.Since(began).Round(time.Second))
@@ -164,6 +158,25 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// acquire takes a transcoding slot. A player often reconnects immediately, so it gives the previous ffmpeg a moment to exit.
+func (s *Service) acquire(ctx context.Context, title string) (release func(), ok bool) {
+	wait, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	select {
+	case s.slots <- struct{}{}:
+		return func() { <-s.slots }, true
+	case <-wait.Done():
+		slog.Warn("transcode refused, all sessions busy", "file", title)
+		return nil, false
+	}
+}
+
+func (s *Service) track(d int) {
+	s.mu.Lock()
+	s.active += d
+	s.mu.Unlock()
+}
+
 // Active returns the number of running ffmpeg processes.
 func (s *Service) Active() int {
 	s.mu.Lock()
@@ -171,9 +184,22 @@ func (s *Service) Active() int {
 	return s.active
 }
 
-// Args builds the ffmpeg command line for a plan.
+// Args builds the ffmpeg command line for a plan streamed to a TV (MPEG-TS, or FLAC for audio).
 func Args(p Plan, path string, start float64, hwaccel string) []string {
+	args := baseArgs(p, path, start, hwaccel, false)
+	if p.Video == "" {
+		return append(args, "-f", "flac", "pipe:1")
+	}
+	return append(args, "-sn", "-dn", "-f", "mpegts", "-muxdelay", "0", "-muxpreload", "0", "pipe:1")
+}
+
+// baseArgs covers input, stream selection and codecs; the caller adds the muxer.
+// throttle limits reading to twice real time, for outputs written to disk instead of a pipe.
+func baseArgs(p Plan, path string, start float64, hwaccel string, throttle bool) []string {
 	args := []string{"-nostdin", "-hide_banner", "-v", "error", "-fflags", "+genpts"}
+	if throttle {
+		args = append(args, "-readrate", "2", "-readrate_initial_burst", "60")
+	}
 	if start > 0 {
 		args = append(args, "-ss", strconv.FormatFloat(start, 'f', 3, 64))
 	}
@@ -183,13 +209,12 @@ func Args(p Plan, path string, start float64, hwaccel string) []string {
 	args = append(args, "-i", path)
 
 	if p.Video == "" {
-		// Audio-only output.
-		return append(args, "-map", "0:a:0", "-vn", "-c:a", "flac", "-f", "flac", "pipe:1")
-	}
-
-	args = append(args, "-map", "0:v:0")
-	if p.Audio != "" {
-		args = append(args, "-map", "0:a:0?")
+		args = append(args, "-map", "0:a:0", "-vn")
+	} else {
+		args = append(args, "-map", "0:v:0")
+		if p.Audio != "" {
+			args = append(args, "-map", "0:a:0?")
+		}
 	}
 	switch p.Video {
 	case "copy":
@@ -210,8 +235,10 @@ func Args(p Plan, path string, start float64, hwaccel string) []string {
 		args = append(args, "-c:a", "ac3", "-b:a", "640k", "-ac", "6")
 	case "aac":
 		args = append(args, "-c:a", "aac", "-b:a", "192k", "-ac", "2")
+	case "flac":
+		args = append(args, "-c:a", "flac")
 	}
-	return append(args, "-sn", "-dn", "-f", "mpegts", "-muxdelay", "0", "-muxpreload", "0", "pipe:1")
+	return args
 }
 
 // ParseNPT reads the start of "npt=123.4-", "npt=0:02:03.5-" or "npt=10-20" in seconds.
