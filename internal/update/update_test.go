@@ -31,7 +31,8 @@ func TestCompare(t *testing.T) {
 			t.Errorf("%s vs %s: %d", c.a, c.b, got)
 		}
 	}
-	if IsVersion("dev") || IsVersion("b3b5f11-dirty") || !IsVersion("v0.1.0") {
+	if IsVersion("dev") || IsVersion("b3b5f11-dirty") || IsVersion("v0.1.0-dirty") || IsVersion("v0.1.0-3-g14c9adc") ||
+		!IsVersion("v0.1.0") || !IsVersion("v0.2.0-rc.1") {
 		t.Error("IsVersion")
 	}
 }

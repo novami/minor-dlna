@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -395,6 +396,12 @@ func parse(s string) (semver, bool) {
 		}
 		v.n[i] = n
 	}
+	// Only release pre-tags count; "v0.1.0-3-gabc123-dirty" from git describe is a local build.
+	if pre != "" && !rePre.MatchString(pre) {
+		return v, false
+	}
 	v.pre = pre
 	return v, true
 }
+
+var rePre = regexp.MustCompile(`^(alpha|beta|rc)(\.\d+)?$`)
