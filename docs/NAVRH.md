@@ -16,7 +16,7 @@ Mediální server v Go pro sdílení videí, fotek a hudby z Macu do TV (primár
 - Knihovny: Filmy, Seriály, Videa, Fotky, **Hudba**.
 - Index v SQLite, detekce změn podle mtime složek + periodický plný rescan.
 - Metadata ze souborů: ffprobe, EXIF, hudební tagy (ID3/Vorbis/MP4).
-- **Metadata z TMDb** (plakáty, popisy, žánry, obsazení, seriály) – opt-in, vlastní API klíč.
+- **Metadata filmů a seriálů** z Wikidat a Wikipedie (bez klíče, výchozí) + volitelně TMDb s vlastním klíčem (plakáty, delší popisy).
 - Náhledy a odvozená rozlišení fotek, HEIC → JPEG.
 - Direct play / částečné / plné transkódování přes ffmpeg s **VideoToolbox** (HW akcelerace Macu).
 - Titulky: externí `.srt` k TV i do webového přehrávače.
@@ -41,11 +41,11 @@ Mediální server v Go pro sdílení videí, fotek a hudby z Macu do TV (primár
        ◄─HTTP─┤ stream     direct (Range) | transcode (MPEG-TS) | HLS        │
  Prohlížeč ◄──┤ web        UI + REST API (embed.FS)                          │
               │ library    scanner, watcher, parser názvů, tagy            │
-              │ metadata   TMDb klient, cache obrázků                      │
+              │ metadata   Wikidata/TMDb, cache plakátů                    │
               │ store      SQLite (modernc.org/sqlite, bez cgo)            │
               │ profiles   schopnosti klientů (LG webOS 22+, generic)      │
               └──────────────────────────────────────────────────────────────┘
-                       │ ffmpeg / ffprobe (Homebrew), TMDb API (HTTPS)
+                       │ ffmpeg / ffprobe (Homebrew), Wikidata/Wikipedie, TMDb (HTTPS)
 ```
 
 ### Struktura projektu
@@ -61,7 +61,7 @@ internal/didl/               DIDL-Lite (pro Browse i SetAVTransportURI)
 internal/dlna/               protocolInfo, DLNA.ORG_* příznaky, hlavičky
 internal/library/            scanner, watcher, klasifikace, parser názvů
 internal/media/              ffprobe, EXIF, hudební tagy, náhledy, HEIC
-internal/metadata/tmdb/      vyhledání, detail, obrázky, rate limit
+internal/metadata/           Wikidata/Wikipedie, volitelně TMDb, párování, cache plakátů
 internal/transcode/          profily klientů, rozhodování, ffmpeg sessions, HLS segmenty
 internal/playstate/          pozice, zhlédnuto, pokračovat
 internal/store/              schéma, migrace, dotazy
@@ -87,7 +87,7 @@ internal/version/            verze vložená při buildu (-ldflags)
 - `GetSystemUpdateID` + GENA eventing – TV obnoví výpis po změně knihovny.
 - `Search` – základní (`upnp:class derivedfrom`, `dc:title contains`).
 - Stabilní Object ID (`movies/123`, `music/artist/45`), nikdy cesty na disku.
-- DIDL obsahuje TMDb data: `upnp:albumArtURI` (plakát), `upnp:genre`, `dc:description`, `dc:date`; u hudby `upnp:artist`, `upnp:album`, `upnp:originalTrackNumber`.
+- DIDL obsahuje metadata filmů: `upnp:albumArtURI` (plakát), `upnp:genre`, `dc:description`, `dc:date`; u hudby `upnp:artist`, `upnp:album`, `upnp:originalTrackNumber`.
 
 **Streamování**
 - Direct play: `http.ServeContent` (Range, 206, HEAD).
@@ -140,17 +140,17 @@ Správa: jeden ffmpeg proces na stream, ukončení při odpojení (context cance
 
 **Parser názvů:** `Film (2019).mkv`, `Film.2019.1080p.x265.mkv` → titul + rok; `Serial S01E02`, `1x02`, `Serial/Season 1/02.mkv` → seriál/sezóna/epizoda. Override přes `.nfo` není v MVP.
 
-**TMDb**
-- API v3, autentizace Read Access Token (v4 bearer), jazyk `cs-CZ` s fallbackem `en-US`.
-- Párování: film `search/movie` (titul + rok), seriál `search/tv` + `tv/{id}/season/{n}`; skóre shody, při nejistotě položka „nespárováno“ a ruční oprava ve web UI.
-- Ukládá: titul, originální titul, popis, rok, žánry, hodnocení, délku, obsazení (top 10), plakát, backdrop; obrázky stažené do lokální cache (velikost `w342`/`w780`).
-- Obnova metadat 1× za 30 dní, rate limit klienta ~40 req/s, úplný běh na pozadí, sken nečeká.
-- Podmínky TMDb: zobrazit logo a text o použití TMDb ve web UI (sekce O aplikaci).
-- Bez API klíče vše funguje s názvy ze souborů.
+**Metadata filmů a seriálů**
+- Zdroj bez klíče: Wikidata (CC0) – vyhledání `wbsearchentities` (cs, toleruje chybějící diakritiku), filtr na film/seriál, shoda roku; z entity český a originální název, rok, žánry, režie, obsazení (top 10), délka, ID na TMDb. Popis z české Wikipedie (fallback anglická), plakát = obrázek článku, jen pokud je na výšku.
+- Volitelně TMDb (uživatelův Read Access Token, zdarma pro nekomerční použití): podle TMDb ID z Wikidat, jinak `search/movie`/`search/tv`; doplní plakát `w342`, český popis a hodnocení.
+- Párování podle dvojice (název ze souboru, rok) / názvu seriálu – nezávisí na ID položek, přežije přeindexování. Nejistá shoda = „nespárováno“, ruční oprava v Nastavení (vyhledání + výběr, nebo „bez metadat“).
+- Spárovaný film se v TV i webu zobrazí s českým názvem a řadí se podle něj; nespárovaný podle souboru.
+- Běh na pozadí po skenu, sekvenčně (šetrné k API), obnova po 30 dnech, nespárované znovu po 7 dnech. Plakáty v lokální cache (tn 160 px pro DLNA, sm pro web).
+- Vypnutelné v Nastavení (posílá názvy filmů na Wikidata/TMDb). Uvedení zdrojů (Wikidata, Wikipedie CC BY-SA, TMDb) v Nastavení.
 
 **Hudba** – tagy přes `dhowden/tag` (ID3v2, FLAC, MP4, OGG), chybějící údaje ze struktury `Interpret/Album/01 Skladba.ext`; obal z tagu nebo `cover`/`folder`/`front.jpg`. Pohledy: Interpreti → Alba → Skladby, Alba, Žánry → Alba, Složky. Formáty pro LG direct: MP3, AAC, FLAC, WAV; ALAC/Opus/APE → FLAC (fáze 4).
 
-**Index (SQLite):** od fáze 2 `library`, `dir` (jen složky s médii), `show`, `item` (soubor + parsované údaje + technické údaje z ffprobe v jedné tabulce), `meta` (SystemUpdateID). Fáze 3 přidala sloupce fotek/hudby do `item` a tabulky `artist`, `album`, `genre`. Další fáze přidají `tmdb_cache`, `image`, `play_state`, `client`, `renderer`. Rescan zapisuje jen změněné soubory (size+mtime). ID objektů (`I<id>`, `D<id>`, `S<id>`) jsou stabilní napříč restarty.
+**Index (SQLite):** od fáze 2 `library`, `dir` (jen složky s médii), `show`, `item` (soubor + parsované údaje + technické údaje z ffprobe v jedné tabulce), `meta` (SystemUpdateID). Fáze 3 přidala sloupce fotek/hudby do `item` a tabulky `artist`, `album`, `genre`. Další fáze přidají `meta_match` (fáze 6), `play_state`, `client`, `renderer`. Rescan zapisuje jen změněné soubory (size+mtime). ID objektů (`I<id>`, `D<id>`, `S<id>`) jsou stabilní napříč restarty.
 
 **Detekce změn (místo fsnotify):** fsnotify na macOS používá kqueue s jedním deskriptorem na soubor, což u velkých knihoven narazí na limity. Proto každou minutu `stat` všech známých složek – změněné mtime složky (přidání/smazání/přejmenování) spustí rescan knihovny; soubory mladší 2 min se považují za kopírované a knihovna se zkontroluje znovu. Plný rescan každých 6 h zachytí úpravy souborů na místě. Funguje stejně i na síťových svazcích, bez závislosti.
 
@@ -165,7 +165,7 @@ Správa: jeden ffmpeg proces na stream, ukončení při odpojení (context cance
 
 - `http://<mac>.local:8200/` – `html/template` + htmx, hls.js pro prohlížeče bez nativního HLS (Safari má nativní), vše v `embed.FS`, bez Node buildu.
 - **Uživatelská část:** Domů (Pokračovat, Naposledy přidané), knihovny s plakáty, detail (popis, obsazení, stopy, titulky), tlačítka *Přehrát zde* / *Přehrát na TV* (výběr TV), ovladač TV (pauza, seek, hlasitost), fotky jako mřížka + prohlížeč, hudba s přehrávačem a frontou.
-- **Admin část:** knihovny (složky, typ, rescan), TMDb (klíč, nespárované položky, ruční párování), zařízení (TV, profily, WoL), aktivní streamy, nastavení, logy.
+- **Admin část:** knihovny (složky, typ, rescan), metadata (zapnutí, TMDb klíč, nespárované položky, ruční párování), zařízení (TV, profily, WoL), aktivní streamy, nastavení, logy.
 - Ochrana: jedno heslo (bcrypt) + session cookie; DLNA endpointy bez hesla (protokol to neumí), volitelný allowlist podsítí.
 
 ## 9. Konfigurace a provoz na macOS
@@ -180,9 +180,9 @@ libraries:
   - { name: Seriály, type: shows,  paths: ["/Volumes/Media/Serialy"] }
   - { name: Fotky,   type: photos, paths: ["~/Pictures/Export"] }
   - { name: Hudba,   type: music,  paths: ["~/Music/FLAC"] }
-tmdb:
-  token: ""                    # prázdné = vypnuto
-  language: cs-CZ
+metadata:
+  enabled: true                # Wikidata/Wikipedie
+  tmdb_token: ""               # prázdné = bez TMDb
 transcode:
   ffmpeg: ""                   # prázdné = PATH, /opt/homebrew/bin
   hwaccel: videotoolbox        # none | videotoolbox
@@ -233,7 +233,7 @@ updates:
 | Konfigurace | `gopkg.in/yaml.v3` |
 | Web (frontend) | htmx, hls.js – vendorované soubory v `embed.FS` |
 
-TMDb klient, DLNA vrstva i updater vlastní (několik endpointů, bez SDK).
+Klienti Wikidat/TMDb, DLNA vrstva i updater vlastní (několik endpointů, bez SDK).
 
 ## 11. Fáze implementace
 
@@ -242,7 +242,7 @@ TMDb klient, DLNA vrstva i updater vlastní (několik endpointů, bez SDK).
 3. **Fotky + hudba:** EXIF, odvozeniny, HEIC, náhledy videí; tagy, pohledy Interpret/Album.
 4. **Transkódování:** profily, rozhodování, VideoToolbox, MPEG-TS, TimeSeekRange, SRT.
 5. **Web UI základ + aktualizace:** přihlášení, knihovny s náhledy, admin, launchd install, release pipeline, updater (auto i ruční).
-6. **TMDb:** párování, cache obrázků, ruční oprava, plakáty v TV i webu.
+6. **Metadata (Wikidata + volitelně TMDb):** párování, cache plakátů, ruční oprava, plakáty a české názvy v TV i webu.
 7. **Přehrát na TV:** discovery rendererů, AVTransport, ovladač, play state, další epizoda, WoL.
 8. **Webový přehrávač:** direct MP4 / HLS, pozice, titulky, hudební přehrávač.
 
@@ -250,7 +250,7 @@ Každá fáze končí funkčním stavem testovaným na LG TV.
 
 ## 12. Testování
 
-- Unit (tabulkové): DIDL/protocolInfo, SSDP parser, parser názvů, rozhodování direct/transcode, TMDb párovací skóre (fixtures, bez sítě).
+- Unit (tabulkové): DIDL/protocolInfo, SSDP parser, parser názvů, rozhodování direct/transcode, párovací skóre metadat (fixtures, bez sítě).
 - Integrace: `httptest` – SOAP Browse, stream (Range, HEAD, TimeSeekRange), falešný MediaRenderer pro AVTransport.
 - Updater: falešný GitHub API server (`httptest`) – novější/stejná verze, špatný checksum, špatný podpis, odložení při streamu, rollback.
 - Ruční checklist na LG: objevení, 10k+ položek, seek, titulky SRT, HEVC HDR / Dolby Vision, TrueHD film, HEIC fotka, FLAC album, Přehrát na TV + pokračování, WoL.
@@ -263,7 +263,7 @@ Každá fáze končí funkčním stavem testovaným na LG TV.
 - **Více rozhraní (Wi-Fi + Ethernet + VPN):** chybná IP v `LOCATION` = TV server vidí, ale nepřehraje.
 - **LG AVTransport quirky:** některé firmwary odmítají `SetAVTransportURI` bez přesného DIDL `protocolInfo`, nebo nehlásí `LastChange` – proto polling.
 - **Pozice u přehrávání spuštěného z TV** je jen odhad.
-- **TMDb:** posílá názvy souborů na externí službu (opt-in), chybné párování u obecných názvů, závislost na dostupnosti API.
+- **Metadata:** posílají názvy filmů na Wikidata/TMDb (vypnutelné), chybné párování u obecných názvů, plakáty z Wikipedie jen u části filmů, závislost na dostupnosti API.
 - **HLS v prohlížeči** u HEVC/Dolby Vision: Chrome/Firefox HEVC neumí spolehlivě → transkód do H.264 (zátěž CPU/GPU).
 - **Wi-Fi propustnost** u 4K remuxů – řešení jen kabel nebo nižší bitrate.
 - **Samoaktualizace a macOS:** výměna binárky mění její hash → systém může znovu žádat povolení Místní síť / firewallu. Stabilní ad-hoc identifier to zmírní, spolehlivě to vyřeší až podpis Developer ID + notarizace (placený účet Apple). Ztráta podpisového klíče Ed25519 = nutnost ruční reinstalace.
