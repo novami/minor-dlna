@@ -38,6 +38,7 @@ type Scanner struct {
 
 	mu       sync.Mutex
 	scanning bool
+	progress Progress
 	dirs     map[int64]map[string]time.Time // library → folder → mtime at last scan
 	pending  map[int64]bool                 // library has files still being written
 }
@@ -59,6 +60,26 @@ func (s *Scanner) Scanning() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.scanning
+}
+
+// Progress describes a running scan for the UI.
+type Progress struct {
+	Library string `json:"library"` // library being walked, empty while probing
+	Files   int    `json:"files"`   // media files found so far in it
+	Probing int    `json:"probing"` // files waiting for technical details
+}
+
+// Progress returns the state of the running scan.
+func (s *Scanner) Progress() Progress {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.progress
+}
+
+func (s *Scanner) setProgress(f func(*Progress)) {
+	s.mu.Lock()
+	f(&s.progress)
+	s.mu.Unlock()
 }
 
 // Run scans everything, then keeps checking for changes until ctx is done.
@@ -92,6 +113,7 @@ func (s *Scanner) scanAll(ctx context.Context, force bool) {
 	defer func() {
 		s.mu.Lock()
 		s.scanning = false
+		s.progress = Progress{}
 		s.mu.Unlock()
 	}()
 	changed := false
@@ -180,6 +202,8 @@ type existing struct {
 
 // ScanLibrary walks the library folders and reconciles the index.
 func (s *Scanner) ScanLibrary(ctx context.Context, lib *Library) (scanStats, error) {
+	s.setProgress(func(p *Progress) { *p = Progress{Library: lib.Name} })
+	defer s.setProgress(func(p *Progress) { p.Library = "" })
 	known, err := s.existingItems(ctx, lib.ID)
 	if err != nil {
 		return scanStats{}, err
@@ -231,6 +255,10 @@ func (s *Scanner) ScanLibrary(ctx context.Context, lib *Library) (scanStats, err
 			relDir := filepath.Dir(rel)
 			if relDir == "." {
 				relDir = ""
+			}
+			if len(files)%50 == 0 {
+				n := len(files)
+				s.setProgress(func(p *Progress) { p.Files = n })
 			}
 			fd := found{root: root, rel: rel, path: p, format: f, size: info.Size(), mtime: info.ModTime().Unix(), relDir: relDir}
 			// Read file metadata only for new or changed files, outside the write transaction.
@@ -619,6 +647,9 @@ func (s *Scanner) probePending(ctx context.Context) bool {
 			}
 		}
 		rows.Close()
+		var left int
+		_ = s.cat.st.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM item WHERE probed = 0 AND kind IN (?, ?)`, int(dlna.Video), int(dlna.Audio)).Scan(&left)
+		s.setProgress(func(p *Progress) { p.Probing = left })
 		if len(jobs) == 0 {
 			return updated
 		}

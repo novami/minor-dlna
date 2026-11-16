@@ -60,7 +60,7 @@ async function load() {
     password: "",
   };
   render();
-  if (!state.setup_needed) loadUpdate();
+  if (!state.setup_needed) { loadUpdate(); loadStorage(); }
 }
 
 function header() {
@@ -288,11 +288,13 @@ function home() {
     <section class="card">
       <h2>Knihovny</h2>
       <p class="hint">Změny ve složkách se projeví do minuty. Na televizi otevřete <b>Média</b> nebo <b>Připojená zařízení</b>.</p>
+      <div id="scan">${scanInfo()}</div>
       <div class="stats">${stats()}</div>
       ${state.ffmpeg ? "" : ffmpegNotice()}
       <div class="actions"><button onclick="rescan(this)">Prohledat znovu</button></div>
     </section>
     <section class="card" id="updates">${updatesCard()}</section>
+    <section class="card" id="storage">${storageCard()}</section>
     <div class="foot">
       <span>Verze ${esc(state.version)} · ${state.addresses.map((a) => `<span class="addr">${esc(a)}</span>`).join(" ")}</span>
       <span>${state.is_local ? "" : `<button class="link" onclick="logout()">Odhlásit</button>`}
@@ -350,6 +352,50 @@ window.quitServer = async () => {
   document.getElementById("status").hidden = true;
 };
 window.logout = async () => { await api("/api/logout", {}).catch(() => {}); renderLogin(); };
+
+function scanInfo() {
+  if (!state.scanning) return "";
+  const p = state.progress || {};
+  let text = "Indexuji knihovny…";
+  if (p.library) text = `Prohledávám knihovnu „${esc(p.library)}“${p.files ? ` – nalezeno ${p.files.toLocaleString("cs-CZ")} souborů` : ""}…`;
+  else if (p.probing) text = `Zjišťuji délku a formát u ${p.probing.toLocaleString("cs-CZ")} souborů…`;
+  return `<div class="progress"><div class="bar"></div><span>${text}</span></div>`;
+}
+
+// ---------- storage ----------
+
+let storage = null;
+
+function fmtBytes(n) {
+  const u = ["B", "kB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1000 && i < u.length - 1) { n /= 1000; i++; }
+  return `${n.toLocaleString("cs-CZ", { maximumFractionDigits: n < 10 && i ? 1 : 0 })} ${u[i]}`;
+}
+
+function storageCard() {
+  if (!storage) return `<h2>Místo na disku</h2><p class="hint">Načítám…</p>`;
+  return `<h2>Místo na disku</h2>
+    <p class="hint">Aplikace zabírá celkem <b>${fmtBytes(storage.total)}</b>. Vaše média se nepočítají ani nemažou.</p>
+    <div class="usage">${storage.parts.filter((p) => p.bytes > 0 || !p.cleanable).map((p) => `
+      <div class="usage-row"><span>${esc(p.title)}${p.cleanable ? ` <small>lze pročistit</small>` : ""}</span><b>${fmtBytes(p.bytes)}</b></div>`).join("")}
+    </div>
+    <div class="actions"><span class="addr left">Náhledy se po pročištění vytvoří znovu při procházení.</span>
+      <button onclick="cleanStorage(this)" ${storage.cleanable > 0 ? "" : "disabled"}>Pročistit ${storage.cleanable > 0 ? fmtBytes(storage.cleanable) : ""}</button></div>`;
+}
+
+async function loadStorage() {
+  try { storage = await api("/api/storage"); } catch (_) { return; }
+  const el = document.getElementById("storage");
+  if (el) el.innerHTML = storageCard();
+}
+
+window.cleanStorage = async (btn) => {
+  if (!confirm(`Smazat náhledy, zálohu indexu, staré protokoly a předchozí verzi aplikace (${fmtBytes(storage.cleanable)})? Index knihoven a nastavení zůstanou.`)) return;
+  btn.disabled = true;
+  try { storage = await api("/api/storage/clean", {}); } catch (e) { alert(e.message); }
+  document.getElementById("storage").innerHTML = storageCard();
+};
 
 // ---------- library ----------
 
@@ -477,6 +523,9 @@ setInterval(async () => {
       const el = document.querySelector(".stats");
       if (el) el.innerHTML = stats();
     }
+    const scan = document.getElementById("scan");
+    if (scan) scan.innerHTML = scanInfo();
+    if (changed && !s.scanning) loadStorage();
   } catch (_) { /* restarting or logged out */ }
 }, 3000);
 

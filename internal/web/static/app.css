@@ -132,3 +132,10 @@ a.button { display: inline-block; text-decoration: none; font-weight: 600; borde
 .lightbox .cap { position: absolute; bottom: 18px; color: #ddd; font-size: 14px; }
 .lightbox button { position: absolute; background: rgba(255,255,255,.12); color: #fff; font-size: 26px; width: 48px; height: 48px; border-radius: 50%; padding: 0; }
 .lightbox .prev { left: 16px; } .lightbox .next { right: 16px; } .lightbox .close { top: 16px; right: 16px; }
+.progress { position: relative; overflow: hidden; border-radius: 10px; background: var(--accent-soft); color: var(--accent); padding: 10px 14px; margin-bottom: 12px; font-size: 14px; font-weight: 600; }
+.progress .bar { position: absolute; left: 0; bottom: 0; height: 3px; width: 40%; background: var(--accent); animation: slide 1.4s ease-in-out infinite; }
+@keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+.usage { display: grid; gap: 6px; }
+.usage-row { display: flex; justify-content: space-between; padding: 8px 12px; background: var(--field); border-radius: 10px; font-size: 14px; }
+.usage-row small { color: var(--muted); font-size: 12px; margin-left: 6px; }
+.actions .addr.left { margin-right: auto; align-self: center; }

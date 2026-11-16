@@ -62,6 +62,8 @@ func (s *Server) Register(mux *http.ServeMux) {
 		s.Scanner.Rescan()
 		writeJSON(w, map[string]bool{"ok": true})
 	})))
+	mux.Handle("GET /api/storage", s.local(http.HandlerFunc(s.storage)))
+	mux.Handle("POST /api/storage/clean", s.local(http.HandlerFunc(s.cleanStorage)))
 	mux.Handle("GET /api/browse", s.local(http.HandlerFunc(s.browse)))
 	mux.Handle("GET /api/update", s.local(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, s.Updates.State())
@@ -150,24 +152,25 @@ type libraryJSON struct {
 }
 
 type stateJSON struct {
-	Version      string        `json:"version"`
-	Name         string        `json:"name"`
-	ComputerName string        `json:"computer_name"`
-	SetupNeeded  bool          `json:"setup_needed"`
-	Autostart    bool          `json:"autostart"`
-	FFmpeg       bool          `json:"ffmpeg"`
-	Scanning     bool          `json:"scanning"`
-	Addresses    []string      `json:"addresses"`
-	Libraries    []libraryJSON `json:"libraries"`
-	DTS          bool          `json:"dts"`
-	IsLocal      bool          `json:"is_local"`
-	Remote       bool          `json:"remote"`
-	AutoUpdate   bool          `json:"auto_update"`
-	MenuBar      bool          `json:"menubar"`
-	InApp        bool          `json:"in_app"`
-	HWAccel      string        `json:"hwaccel"`
-	Suggestions  []libraryJSON `json:"suggestions"`
-	Home         string        `json:"home"`
+	Version      string           `json:"version"`
+	Name         string           `json:"name"`
+	ComputerName string           `json:"computer_name"`
+	SetupNeeded  bool             `json:"setup_needed"`
+	Autostart    bool             `json:"autostart"`
+	FFmpeg       bool             `json:"ffmpeg"`
+	Scanning     bool             `json:"scanning"`
+	Progress     library.Progress `json:"progress"`
+	Addresses    []string         `json:"addresses"`
+	Libraries    []libraryJSON    `json:"libraries"`
+	DTS          bool             `json:"dts"`
+	IsLocal      bool             `json:"is_local"`
+	Remote       bool             `json:"remote"`
+	AutoUpdate   bool             `json:"auto_update"`
+	MenuBar      bool             `json:"menubar"`
+	InApp        bool             `json:"in_app"`
+	HWAccel      string           `json:"hwaccel"`
+	Suggestions  []libraryJSON    `json:"suggestions"`
+	Home         string           `json:"home"`
 }
 
 func (s *Server) state(w http.ResponseWriter, r *http.Request) {
@@ -183,7 +186,7 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, stateJSON{
 		Version: s.Version, Name: s.Cfg.Name, ComputerName: macos.ComputerName(),
 		SetupNeeded: len(s.Cfg.Libraries) == 0, Autostart: macos.AutostartEnabled(),
-		FFmpeg: s.FFmpeg, Scanning: s.Scanner.Scanning(), Addresses: lanAddresses(s.Cfg.Port),
+		FFmpeg: s.FFmpeg, Scanning: s.Scanner.Scanning(), Progress: s.Scanner.Progress(), Addresses: lanAddresses(s.Cfg.Port),
 		Libraries: libs, IsLocal: isLocal(r), Remote: s.remoteEnabled(), DTS: s.Cfg.Transcode.DTSEnabled(), AutoUpdate: s.Cfg.Updates.AutoEnabled(), HWAccel: s.Cfg.Transcode.HWAccel,
 		Suggestions: suggestions(), Home: homeDir(), MenuBar: s.Cfg.MenuBarEnabled(), InApp: inApp(),
 	})
