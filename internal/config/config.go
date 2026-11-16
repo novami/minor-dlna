@@ -37,6 +37,7 @@ type Config struct {
 	Allow      []string  `yaml:"allow"`
 	Libraries  []Library `yaml:"libraries"`
 	Transcode  Transcode `yaml:"transcode"`
+	Updates    Updates   `yaml:"updates"`
 
 	allow []netip.Prefix
 }
@@ -47,6 +48,14 @@ type Transcode struct {
 	MaxSessions int    `yaml:"max_sessions"` // concurrent ffmpeg processes
 	DTS         *bool  `yaml:"dts"`          // TV decodes DTS (differs by LG model line)
 }
+
+type Updates struct {
+	Auto    *bool  `yaml:"auto"`    // install new versions automatically (default true)
+	Channel string `yaml:"channel"` // stable | prerelease
+}
+
+// AutoEnabled defaults to true.
+func (u Updates) AutoEnabled() bool { return u.Auto == nil || *u.Auto }
 
 // DTSEnabled defaults to true.
 func (t Transcode) DTSEnabled() bool { return t.DTS == nil || *t.DTS }
@@ -127,6 +136,13 @@ func (c *Config) validate() error {
 		c.Transcode.MaxSessions = 2
 	}
 	c.Transcode.FFmpeg = ExpandHome(c.Transcode.FFmpeg)
+	switch c.Updates.Channel {
+	case "":
+		c.Updates.Channel = "stable"
+	case "stable", "prerelease":
+	default:
+		return fmt.Errorf("updates.channel: unknown value %q (stable, prerelease)", c.Updates.Channel)
+	}
 	c.allow = c.allow[:0]
 	for _, a := range c.Allow {
 		p, err := netip.ParsePrefix(a)

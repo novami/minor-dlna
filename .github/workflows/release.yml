@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go vet ./... && go test ./...
+
+      - name: Build app
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: packaging/build-app.sh
+
+      - name: Package and sign
+        env:
+          VERSION: ${{ github.ref_name }}
+          MINORDLNA_SIGNING_KEY: ${{ secrets.MINORDLNA_SIGNING_KEY }}
+        run: |
+          cd dist
+          ditto -c -k --norsrc --noextattr --noacl --keepParent MinorDLNA.app "MinorDLNA-${VERSION}-macos.zip"
+          shasum -a 256 "MinorDLNA-${VERSION}-macos.zip" > checksums.txt
+          cd ..
+          go run ./tools/release sign dist/checksums.txt
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          flags=""
+          case "$VERSION" in *-*) flags="--prerelease" ;; esac
+          gh release create "$VERSION" $flags --generate-notes --title "MinorDLNA $VERSION" \
+            "dist/MinorDLNA-${VERSION}-macos.zip" dist/checksums.txt dist/checksums.txt.sig

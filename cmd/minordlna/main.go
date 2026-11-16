@@ -28,6 +28,7 @@ import (
 	"github.com/novami/minor-dlna/internal/stream"
 	"github.com/novami/minor-dlna/internal/thumbs"
 	"github.com/novami/minor-dlna/internal/transcode"
+	"github.com/novami/minor-dlna/internal/update"
 	"github.com/novami/minor-dlna/internal/upnp"
 	"github.com/novami/minor-dlna/internal/version"
 	"github.com/novami/minor-dlna/internal/web"
@@ -65,18 +66,51 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	marker := filepath.Join(filepath.Dir(*cfgPath), "update-pending")
 	for {
-		restart, err := run(ctx, stop, *cfgPath, open)
+		res, err := run(ctx, stop, *cfgPath, open, marker)
 		if err != nil {
 			slog.Error("fatal", "err", err)
+			// A freshly installed version that cannot start is replaced by the previous one.
+			if app, ok := macos.AppBundle(); ok && fileExists(marker) {
+				os.Remove(marker)
+				if exe, rerr := update.Rollback(app); rerr == nil {
+					slog.Warn("update failed to start, rolled back to the previous version")
+					execInto(exe)
+				}
+			}
 			os.Exit(1)
 		}
-		if !restart {
+		switch {
+		case res.exe != "":
+			// New version installed: continue as the new binary in the same process.
+			_ = os.WriteFile(marker, []byte(version.Version), 0o644)
+			execInto(res.exe)
+			os.Exit(1)
+		case !res.restart:
 			return
 		}
 		open = false
 		slog.Info("restarting with new configuration")
 	}
+}
+
+// execInto replaces the process with another executable, keeping the arguments.
+func execInto(exe string) {
+	args := append([]string{exe}, os.Args[1:]...)
+	if err := syscall.Exec(exe, args, os.Environ()); err != nil {
+		slog.Error("exec new version", "err", err)
+	}
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
+}
+
+type runResult struct {
+	restart bool   // configuration changed
+	exe     string // update installed: exec this binary
 }
 
 func uiURL(port int) string { return "http://localhost:" + strconv.Itoa(port) + "/" }
@@ -104,10 +138,10 @@ func setupLogging(debug bool) {
 }
 
 // run serves until quit (returns false) or until a saved configuration asks for a restart (returns true).
-func run(parent context.Context, quit context.CancelFunc, cfgPath string, openBrowser bool) (bool, error) {
+func run(parent context.Context, quit context.CancelFunc, cfgPath string, openBrowser bool, marker string) (runResult, error) {
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
-		return false, err
+		return runResult{}, err
 	}
 	if len(cfg.Libraries) == 0 {
 		slog.Warn("no libraries configured, open the setup page", "url", uiURL(cfg.Port))
@@ -116,15 +150,16 @@ func run(parent context.Context, quit context.CancelFunc, cfgPath string, openBr
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	var restart atomic.Bool
+	var newExe atomic.Value
 
 	st, err := store.Open(filepath.Join(filepath.Dir(cfgPath), "library.db"))
 	if err != nil {
-		return false, err
+		return runResult{}, err
 	}
 	defer st.Close()
 	cat, err := library.NewCatalog(ctx, st, cfg.Libraries)
 	if err != nil {
-		return false, err
+		return runResult{}, err
 	}
 	ffmpeg := cfg.Transcode.FFmpeg
 	if ffmpeg == "" {
@@ -156,8 +191,17 @@ func run(parent context.Context, quit context.CancelFunc, cfgPath string, openBr
 	mux.Handle("/thumb/", th)
 	mux.Handle(transcode.Prefix, tc)
 	mux.Handle(stream.SubsPrefix, stream.SubsHandler(cat))
+	appPath, _ := macos.AppBundle()
+	upd := &update.Manager{
+		Client: update.NewClient(), Current: version.Version, AppPath: appPath,
+		Auto:       cfg.Updates.AutoEnabled,
+		Prerelease: cfg.Updates.Channel == "prerelease",
+		Busy:       func() bool { return stream.Active() > 0 || tc.Active() > 0 },
+		Installed:  func(exe string) { newExe.Store(exe); cancel() },
+	}
+	go upd.Run(ctx)
 	ui := &web.Server{
-		Cfg: cfg, CfgPath: cfgPath, Cat: cat, Scanner: scanner, Version: version.Version, FFmpeg: ffmpeg != "",
+		Cfg: cfg, CfgPath: cfgPath, Cat: cat, Scanner: scanner, Version: version.Version, FFmpeg: ffmpeg != "", Updates: upd,
 		Restart: func() { restart.Store(true); cancel() },
 		Quit:    quit,
 	}
@@ -171,7 +215,7 @@ func run(parent context.Context, quit context.CancelFunc, cfgPath string, openBr
 	}
 	ln, err := net.Listen("tcp4", srv.Addr)
 	if err != nil {
-		return false, fmt.Errorf("port %d is in use: %w", cfg.Port, err)
+		return runResult{}, fmt.Errorf("port %d is in use: %w", cfg.Port, err)
 	}
 
 	disc := &ssdp.Server{
@@ -203,15 +247,28 @@ func run(parent context.Context, quit context.CancelFunc, cfgPath string, openBr
 	if openBrowser {
 		go func() { _ = macos.OpenURL(uiURL(cfg.Port)) }()
 	}
+	if fileExists(marker) && appPath != "" {
+		// First start after an update: once it has run for a minute, drop the previous version.
+		go func() {
+			select {
+			case <-time.After(time.Minute):
+				os.Remove(marker)
+				update.Cleanup(appPath)
+				slog.Info("update confirmed", "version", version.Version)
+			case <-ctx.Done():
+			}
+		}()
+	}
 	if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
-		return false, err
+		return runResult{}, err
 	}
 	err = <-ssdpDone
 	<-scanDone // the scanner must finish before the database closes
-	if !restart.Load() {
+	exe, _ := newExe.Load().(string)
+	if !restart.Load() && exe == "" {
 		slog.Info("MinorDLNA stopped")
 	}
-	return restart.Load(), err
+	return runResult{restart: restart.Load(), exe: exe}, err
 }
 
 // withCommon applies the client allowlist and common response headers.

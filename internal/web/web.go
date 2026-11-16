@@ -20,6 +20,7 @@ import (
 	"github.com/novami/minor-dlna/internal/config"
 	"github.com/novami/minor-dlna/internal/library"
 	"github.com/novami/minor-dlna/internal/macos"
+	"github.com/novami/minor-dlna/internal/update"
 )
 
 //go:embed static
@@ -32,6 +33,7 @@ type Server struct {
 	Scanner *library.Scanner
 	Version string
 	FFmpeg  bool
+	Updates *update.Manager
 	Restart func() // apply a saved config
 	Quit    func()
 }
@@ -52,6 +54,18 @@ func (s *Server) Register(mux *http.ServeMux) {
 	mux.Handle("POST /api/rescan", s.local(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		s.Scanner.Rescan()
 		writeJSON(w, map[string]bool{"ok": true})
+	})))
+	mux.Handle("GET /api/update", s.local(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeJSON(w, s.Updates.State())
+	})))
+	mux.Handle("POST /api/update/check", s.local(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = s.Updates.Check(r.Context())
+		writeJSON(w, s.Updates.State())
+	})))
+	mux.Handle("POST /api/update/install", s.local(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Runs detached: the request would otherwise be cancelled by the restart into the new version.
+		go func() { _ = s.Updates.Install(context.Background()) }()
+		writeJSON(w, map[string]bool{"started": true})
 	})))
 	mux.Handle("POST /api/quit", s.local(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, map[string]bool{"ok": true})
@@ -107,6 +121,7 @@ type stateJSON struct {
 	Addresses    []string      `json:"addresses"`
 	Libraries    []libraryJSON `json:"libraries"`
 	DTS          bool          `json:"dts"`
+	AutoUpdate   bool          `json:"auto_update"`
 	HWAccel      string        `json:"hwaccel"`
 	Suggestions  []libraryJSON `json:"suggestions"`
 	Home         string        `json:"home"`
@@ -126,7 +141,7 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 		Version: s.Version, Name: s.Cfg.Name, ComputerName: macos.ComputerName(),
 		SetupNeeded: len(s.Cfg.Libraries) == 0, Autostart: macos.AutostartEnabled(),
 		FFmpeg: s.FFmpeg, Scanning: s.Scanner.Scanning(), Addresses: lanAddresses(s.Cfg.Port),
-		Libraries: libs, DTS: s.Cfg.Transcode.DTSEnabled(), HWAccel: s.Cfg.Transcode.HWAccel,
+		Libraries: libs, DTS: s.Cfg.Transcode.DTSEnabled(), AutoUpdate: s.Cfg.Updates.AutoEnabled(), HWAccel: s.Cfg.Transcode.HWAccel,
 		Suggestions: suggestions(), Home: homeDir(),
 	})
 }
@@ -157,9 +172,10 @@ type configRequest struct {
 		Type  config.LibraryType `json:"type"`
 		Paths []string           `json:"paths"`
 	} `json:"libraries"`
-	DTS       bool   `json:"dts"`
-	HWAccel   string `json:"hwaccel"`
-	Autostart bool   `json:"autostart"`
+	DTS        bool   `json:"dts"`
+	HWAccel    string `json:"hwaccel"`
+	Autostart  bool   `json:"autostart"`
+	AutoUpdate *bool  `json:"auto_update"`
 }
 
 func (s *Server) saveConfig(w http.ResponseWriter, r *http.Request) {
@@ -192,6 +208,10 @@ func (s *Server) saveConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	dts := req.DTS
 	next.Transcode.DTS = &dts
+	if req.AutoUpdate != nil {
+		auto := *req.AutoUpdate
+		next.Updates.Auto = &auto
+	}
 	if req.HWAccel != "" {
 		next.Transcode.HWAccel = req.HWAccel
 	}

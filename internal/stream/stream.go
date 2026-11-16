@@ -6,12 +6,18 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync/atomic"
 
 	"github.com/novami/minor-dlna/internal/dlna"
 	"github.com/novami/minor-dlna/internal/library"
 )
 
 const Prefix = "/media/"
+
+var active atomic.Int32
+
+// Active returns the number of media files being sent right now.
+func Active() int { return int(active.Load()) }
 
 // Handler serves GET/HEAD requests under Prefix.
 func Handler(cat *library.Catalog) http.Handler {
@@ -47,6 +53,8 @@ func Handler(cat *library.Catalog) http.Handler {
 			slog.Info("stream", "remote", r.RemoteAddr, "file", o.Title, "range", r.Header.Get("Range"))
 		}
 		Captions(w, r, o)
+		active.Add(1)
+		defer active.Add(-1)
 		// ServeContent handles Range (206), If-Modified-Since and HEAD.
 		http.ServeContent(w, r, "", o.ModTime, f)
 	})
