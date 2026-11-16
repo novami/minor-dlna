@@ -10,7 +10,7 @@ Stav: fáze 4 – index v SQLite, pohledy Filmy (A–Z, naposledy přidané, pod
 make install-app
 ```
 
-Sestaví `MinorDLNA.app` a zkopíruje ji do `~/Applications`. Pak ji spusťte z Finderu nebo Spotlightu: aplikace běží na pozadí (bez ikony v Docku) a otevře v prohlížeči průvodce prvním nastavením – název serveru, složky s médii (výběr přes okno macOS), DTS a spouštění po přihlášení. Další spuštění otevře nastavení běžícího serveru.
+Sestaví `MinorDLNA.app` a zkopíruje ji do `~/Applications`. Pak ji spusťte z Finderu nebo Spotlightu: aplikace běží na pozadí (bez ikony v Docku, s ikonou v řádku nabídek) a otevře v prohlížeči průvodce prvním nastavením – název serveru, složky s médii (výběr přes okno macOS), DTS a spouštění po přihlášení. Další spuštění otevře nastavení běžícího serveru.
 
 - Nastavení: `~/Library/Application Support/MinorDLNA/config.yaml` (index a cache vedle)
 - Logy: `~/Library/Logs/MinorDLNA/minordlna.log`

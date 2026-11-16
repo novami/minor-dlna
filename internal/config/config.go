@@ -40,6 +40,7 @@ type Config struct {
 	Transcode  Transcode `yaml:"transcode"`
 	Updates    Updates   `yaml:"updates"`
 	Remote     Remote    `yaml:"remote"`
+	MenuBar    *bool     `yaml:"menubar"` // icon in the menu bar (default true)
 
 	allow []netip.Prefix
 }
@@ -61,6 +62,9 @@ type Updates struct {
 	Auto    *bool  `yaml:"auto"`    // install new versions automatically (default true)
 	Channel string `yaml:"channel"` // stable | prerelease
 }
+
+// MenuBarEnabled defaults to true.
+func (c *Config) MenuBarEnabled() bool { return c.MenuBar == nil || *c.MenuBar }
 
 // AutoEnabled defaults to true.
 func (u Updates) AutoEnabled() bool { return u.Auto == nil || *u.Auto }

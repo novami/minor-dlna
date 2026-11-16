@@ -1,4 +1,4 @@
-package upnp
+package icon
 
 import (
 	"os"
@@ -16,7 +16,11 @@ func TestExportIcon(t *testing.T) {
 	if v, err := strconv.Atoi(os.Getenv("ICON_SIZE")); err == nil {
 		size = v
 	}
-	if err := os.WriteFile(out, renderIcon(size), 0o644); err != nil {
+	render := App
+	if os.Getenv("ICON_TEMPLATE") != "" {
+		render = Template
+	}
+	if err := os.WriteFile(out, render(size), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

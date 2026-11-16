@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"runtime"
@@ -28,6 +29,7 @@ import (
 	"github.com/novami/minor-dlna/internal/stream"
 	"github.com/novami/minor-dlna/internal/thumbs"
 	"github.com/novami/minor-dlna/internal/transcode"
+	"github.com/novami/minor-dlna/internal/tray"
 	"github.com/novami/minor-dlna/internal/update"
 	"github.com/novami/minor-dlna/internal/upnp"
 	"github.com/novami/minor-dlna/internal/version"
@@ -49,7 +51,8 @@ func main() {
 	setupLogging(*debug)
 
 	_, inBundle := macos.AppBundle()
-	open := *openUI || (inBundle && !*background)
+	open := *openUI || (inBundle && !*background && os.Getenv("MINORDLNA_NO_OPEN") == "")
+	os.Unsetenv("MINORDLNA_NO_OPEN")
 
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
@@ -67,31 +70,116 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	marker := filepath.Join(filepath.Dir(*cfgPath), "update-pending")
-	for {
-		res, err := run(ctx, stop, *cfgPath, open, marker)
-		if err != nil {
-			slog.Error("fatal", "err", err)
-			// A freshly installed version that cannot start is replaced by the previous one.
-			if app, ok := macos.AppBundle(); ok && fileExists(marker) {
-				os.Remove(marker)
-				if exe, rerr := update.Rollback(app); rerr == nil {
-					slog.Warn("update failed to start, rolled back to the previous version")
+	useTray := inBundle && cfg.MenuBarEnabled()
+	var live atomic.Pointer[current]
+
+	serve := func() int {
+		for {
+			res, err := run(ctx, stop, *cfgPath, open, marker, &live)
+			if err != nil {
+				slog.Error("fatal", "err", err)
+				// A freshly installed version that cannot start is replaced by the previous one.
+				if app, ok := macos.AppBundle(); ok && fileExists(marker) {
+					os.Remove(marker)
+					if exe, rerr := update.Rollback(app); rerr == nil {
+						slog.Warn("update failed to start, rolled back to the previous version")
+						execInto(exe)
+					}
+				}
+				return 1
+			}
+			switch {
+			case res.exe != "":
+				// New version installed: continue as the new binary in the same process.
+				_ = os.WriteFile(marker, []byte(version.Version), 0o644)
+				execInto(res.exe)
+				return 1
+			case !res.restart:
+				return 0
+			}
+			open = false
+			// The menu bar icon lives for the whole process: toggling it needs a fresh process.
+			if next, err := config.Load(*cfgPath); err == nil && inBundle && next.MenuBarEnabled() != useTray {
+				if exe, err := os.Executable(); err == nil {
+					os.Setenv("MINORDLNA_NO_OPEN", "1")
 					execInto(exe)
 				}
 			}
-			os.Exit(1)
+			slog.Info("restarting with new configuration")
 		}
-		switch {
-		case res.exe != "":
-			// New version installed: continue as the new binary in the same process.
-			_ = os.WriteFile(marker, []byte(version.Version), 0o644)
-			execInto(res.exe)
-			os.Exit(1)
-		case !res.restart:
-			return
-		}
-		open = false
-		slog.Info("restarting with new configuration")
+	}
+
+	if !useTray {
+		os.Exit(serve())
+	}
+	// Cocoa needs the main thread for the menu bar, so the server runs alongside.
+	var code atomic.Int32
+	go func() {
+		code.Store(int32(serve()))
+		tray.Stop()
+	}()
+	tray.Run(trayActions(&live, stop))
+	os.Exit(int(code.Load()))
+}
+
+// current exposes the running server's parts to the menu bar; replaced on every in-process restart.
+type current struct {
+	cfg     *config.Config
+	scanner *library.Scanner
+	upd     *update.Manager
+	tc      *transcode.Service
+}
+
+func trayActions(live *atomic.Pointer[current], quit context.CancelFunc) tray.Actions {
+	get := func() *current { return live.Load() }
+	return tray.Actions{
+		Status: func() tray.Status {
+			c := get()
+			if c == nil {
+				return tray.Status{}
+			}
+			st := tray.Status{Name: c.cfg.Name, Running: true, Streams: stream.Active() + c.tc.Active(), Scanning: c.scanner.Scanning()}
+			if l := c.upd.State().Latest; l != nil {
+				st.UpdateVer = l.Version
+			}
+			return st
+		},
+		OpenUI: func(tab string) {
+			if c := get(); c != nil {
+				url := uiURL(c.cfg.Port)
+				if tab != "" {
+					url += "#" + tab
+				}
+				_ = macos.OpenURL(url)
+			}
+		},
+		Rescan: func() {
+			if c := get(); c != nil {
+				c.scanner.Rescan()
+			}
+		},
+		CheckUpdate: func() (string, error) {
+			c := get()
+			if c == nil {
+				return "", nil
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			rel, err := c.upd.Check(ctx)
+			if err != nil || rel == nil {
+				return "", err
+			}
+			return rel.Version, nil
+		},
+		InstallUpdate: func() {
+			if c := get(); c != nil {
+				go func() { _ = c.upd.Install(context.Background()) }()
+			}
+		},
+		ShowLog: func() {
+			_ = exec.Command("/usr/bin/open", "-a", "Console", filepath.Join(macos.LogDir(), "minordlna.log")).Run()
+		},
+		Quit: quit,
 	}
 }
 
@@ -138,7 +226,7 @@ func setupLogging(debug bool) {
 }
 
 // run serves until quit (returns false) or until a saved configuration asks for a restart (returns true).
-func run(parent context.Context, quit context.CancelFunc, cfgPath string, openBrowser bool, marker string) (runResult, error) {
+func run(parent context.Context, quit context.CancelFunc, cfgPath string, openBrowser bool, marker string, live *atomic.Pointer[current]) (runResult, error) {
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
 		return runResult{}, err
@@ -200,6 +288,8 @@ func run(parent context.Context, quit context.CancelFunc, cfgPath string, openBr
 		Installed:  func(exe string) { newExe.Store(exe); cancel() },
 	}
 	go upd.Run(ctx)
+	live.Store(&current{cfg: cfg, scanner: scanner, upd: upd, tc: tc})
+	defer live.Store(nil)
 	ui := &web.Server{
 		Cfg: cfg, CfgPath: cfgPath, Cat: cat, Scanner: scanner, Version: version.Version, FFmpeg: ffmpeg != "", Updates: upd,
 		Restart: func() { restart.Store(true); cancel() },

@@ -7,7 +7,9 @@ const $app = document.getElementById("app");
 let state = null;      // server state
 let draft = null;      // edited settings
 let step = 0;          // wizard step
-let tab = sessionStorageGet("tab") || "home";
+const TABS = ["home", "library", "settings"];
+// The menu bar links to a tab with #library etc.
+let tab = TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : (sessionStorageGet("tab") || "home");
 let upd = null;        // update state
 let browse = { trail: [{ id: "0", title: "Knihovny" }], data: null };
 
@@ -53,6 +55,7 @@ async function load() {
     hwaccel: state.hwaccel,
     autostart: state.setup_needed ? true : state.autostart,
     auto_update: state.auto_update,
+    menubar: state.menubar,
     remote: state.remote,
     password: "",
   };
@@ -78,7 +81,11 @@ function render() {
   if (tab === "library" && !browse.data) openFolder(browse.trail[browse.trail.length - 1].id);
 }
 
-window.setTab = (t) => { tab = t; sessionStorageSet("tab", t); render(); };
+window.setTab = (t) => { tab = t; sessionStorageSet("tab", t); history.replaceState(null, "", "#" + t); render(); };
+window.addEventListener("hashchange", () => {
+  const t = location.hash.slice(1);
+  if (TABS.includes(t) && t !== tab && state && !state.setup_needed) { tab = t; render(); }
+});
 
 // ---------- login (other devices) ----------
 
@@ -449,6 +456,7 @@ function settings() {
       <div style="height:8px"></div>
       ${toggle("autostart", "Spouštět po přihlášení", "Server poběží na pozadí, TV ho najde i bez otevírání aplikace.")}
       ${toggle("auto_update", "Automatické aktualizace", "Nové verze se nainstalují samy, nikdy během přehrávání.")}
+      ${state.in_app ? toggle("menubar", "Ikona v řádku nabídek", "Ukazuje, že server běží, a nabízí rychlé volby: správa, knihovna, prohledání, aktualizace, ukončení.") : ""}
       ${toggle("remote", "Přístup z jiných zařízení", "Správa chráněná heslem. " + remoteHint)}
       ${draft.remote ? `<label class="field">${state.remote ? "Nové heslo (prázdné = ponechat)" : "Heslo (aspoň 8 znaků)"}</label>
         <input type="password" autocomplete="new-password" value="${esc(draft.password)}" oninput="draft.password=this.value">` : ""}

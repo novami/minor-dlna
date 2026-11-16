@@ -163,6 +163,8 @@ type stateJSON struct {
 	IsLocal      bool          `json:"is_local"`
 	Remote       bool          `json:"remote"`
 	AutoUpdate   bool          `json:"auto_update"`
+	MenuBar      bool          `json:"menubar"`
+	InApp        bool          `json:"in_app"`
 	HWAccel      string        `json:"hwaccel"`
 	Suggestions  []libraryJSON `json:"suggestions"`
 	Home         string        `json:"home"`
@@ -183,8 +185,13 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 		SetupNeeded: len(s.Cfg.Libraries) == 0, Autostart: macos.AutostartEnabled(),
 		FFmpeg: s.FFmpeg, Scanning: s.Scanner.Scanning(), Addresses: lanAddresses(s.Cfg.Port),
 		Libraries: libs, IsLocal: isLocal(r), Remote: s.remoteEnabled(), DTS: s.Cfg.Transcode.DTSEnabled(), AutoUpdate: s.Cfg.Updates.AutoEnabled(), HWAccel: s.Cfg.Transcode.HWAccel,
-		Suggestions: suggestions(), Home: homeDir(),
+		Suggestions: suggestions(), Home: homeDir(), MenuBar: s.Cfg.MenuBarEnabled(), InApp: inApp(),
 	})
+}
+
+func inApp() bool {
+	_, ok := macos.AppBundle()
+	return ok
 }
 
 // suggestions offers the standard macOS media folders that exist and are not empty.
@@ -218,6 +225,7 @@ type configRequest struct {
 	Autostart  bool   `json:"autostart"`
 	AutoUpdate *bool  `json:"auto_update"`
 	Remote     *bool  `json:"remote"`
+	MenuBar    *bool  `json:"menubar"`
 	Password   string `json:"password"` // new password for remote access, empty = keep
 }
 
@@ -251,6 +259,10 @@ func (s *Server) saveConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	dts := req.DTS
 	next.Transcode.DTS = &dts
+	if req.MenuBar != nil {
+		mb := *req.MenuBar
+		next.MenuBar = &mb
+	}
 	if req.Remote != nil {
 		next.Remote.Enabled = *req.Remote
 		if req.Password != "" {

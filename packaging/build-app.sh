@@ -1,7 +1,7 @@
 #!/bin/sh
 # Builds dist/MinorDLNA.app (universal binary, ad-hoc signed).
 # Regenerate packaging/AppIcon.icns from the icon renderer:
-#   ICON_OUT=icon_512x512@2x.png ICON_SIZE=1024 go test ./internal/upnp -run TestExportIcon
+#   ICON_OUT=icon_512x512@2x.png ICON_SIZE=1024 go test ./internal/icon -run TestExportIcon
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -17,8 +17,10 @@ if [ -d "$APP" ]; then
 fi
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-GOOS=darwin GOARCH=arm64 go build -ldflags "$LDFLAGS" -o dist/minordlna-arm64 ./cmd/minordlna
-GOOS=darwin GOARCH=amd64 go build -ldflags "$LDFLAGS" -o dist/minordlna-amd64 ./cmd/minordlna
+# cgo is needed for the menu bar icon (Cocoa); clang cross-compiles both architectures.
+export CGO_ENABLED=1 MACOSX_DEPLOYMENT_TARGET=12.0
+GOOS=darwin GOARCH=arm64 CC="clang -arch arm64" go build -ldflags "$LDFLAGS" -o dist/minordlna-arm64 ./cmd/minordlna
+GOOS=darwin GOARCH=amd64 CC="clang -arch x86_64" go build -ldflags "$LDFLAGS" -o dist/minordlna-amd64 ./cmd/minordlna
 lipo -create -output "$APP/Contents/MacOS/minordlna" dist/minordlna-arm64 dist/minordlna-amd64
 rm dist/minordlna-arm64 dist/minordlna-amd64
 
