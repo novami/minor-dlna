@@ -130,6 +130,31 @@ var migrations = []string{
 	// Rebuild the index once more: sort keys now follow the Czech alphabet.
 	`DELETE FROM library;
 	DELETE FROM meta WHERE key = 'update_id';`,
+
+	// Movie and show metadata, keyed by what the file name says so it survives reindexing.
+	// kind = library type (movies, shows); query = parsed title + "|" + year, or the show name + "|".
+	// status: 0 unmatched, 1 matched automatically, 2 matched by hand, 3 no metadata by choice.
+	`CREATE TABLE meta_match (
+		id         INTEGER PRIMARY KEY,
+		kind       TEXT NOT NULL,
+		query      TEXT NOT NULL,
+		status     INTEGER NOT NULL DEFAULT 0,
+		wikidata   TEXT,
+		tmdb       TEXT,
+		title      TEXT,
+		sort_title TEXT,
+		orig_title TEXT,
+		year       INTEGER,
+		overview   TEXT,
+		genres     TEXT,
+		director   TEXT,
+		cast       TEXT,
+		runtime    INTEGER,
+		rating     REAL,
+		poster     INTEGER NOT NULL DEFAULT 0,
+		checked_at INTEGER NOT NULL DEFAULT 0,
+		UNIQUE (kind, query)
+	);`,
 }
 
 // Open opens (and migrates) the database at path.

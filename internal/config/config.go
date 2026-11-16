@@ -40,6 +40,7 @@ type Config struct {
 	Transcode  Transcode `yaml:"transcode"`
 	Updates    Updates   `yaml:"updates"`
 	Remote     Remote    `yaml:"remote"`
+	Metadata   Metadata  `yaml:"metadata"`
 	MenuBar    *bool     `yaml:"menubar"` // icon in the menu bar (default true)
 
 	allow []netip.Prefix
@@ -57,6 +58,15 @@ type Remote struct {
 	Enabled      bool   `yaml:"enabled"`
 	PasswordHash string `yaml:"password_hash"` // bcrypt
 }
+
+// Metadata looks up movies and shows on Wikidata and, with a token, on TMDb.
+type Metadata struct {
+	Enabled   *bool  `yaml:"enabled"`    // default true
+	TMDbToken string `yaml:"tmdb_token"` // TMDb API Read Access Token, empty = Wikidata only
+}
+
+// On defaults to true.
+func (m Metadata) On() bool { return m.Enabled == nil || *m.Enabled }
 
 type Updates struct {
 	Auto    *bool  `yaml:"auto"`    // install new versions automatically (default true)
