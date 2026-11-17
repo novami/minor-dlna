@@ -145,7 +145,7 @@ a.button { display: inline-block; text-decoration: none; font-weight: 600; borde
 .usage-row small { color: var(--muted); font-size: 12px; margin-left: 6px; }
 .actions .addr.left { margin-right: auto; align-self: center; }
 
-.meta-list { display: grid; gap: 6px; }
+.meta-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
 .meta-row { display: flex; align-items: center; gap: 12px; padding: 6px 8px 6px 6px; background: var(--field); border-radius: 10px; }
 .meta-row img, .meta-row .ph { width: 36px; height: 54px; border-radius: 6px; object-fit: cover; flex: none; display: grid; place-items: center; background: var(--card); }
 .meta-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
