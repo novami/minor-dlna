@@ -1,6 +1,9 @@
 package transcode
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestDecide(t *testing.T) {
 	lg := LGWebOS22(false)
@@ -33,7 +36,7 @@ func TestDecide(t *testing.T) {
 }
 
 func TestKey(t *testing.T) {
-	for _, p := range []Plan{{"copy", "ac3"}, {"h264", ""}, {"", "flac"}} {
+	for _, p := range []Plan{{"copy", "ac3"}, {"h264", ""}, {"sdr", "copy"}, {"", "flac"}} {
 		got, ok := ParseKey(p.Key())
 		if !ok || got != p {
 			t.Errorf("%+v → %q → %+v %v", p, p.Key(), got, ok)
@@ -43,6 +46,16 @@ func TestKey(t *testing.T) {
 		if _, ok := ParseKey(bad); ok {
 			t.Errorf("%q accepted", bad)
 		}
+	}
+}
+
+func TestSDRArgs(t *testing.T) {
+	vt := strings.Join(baseArgs(Plan{Video: "sdr"}, "f.mkv", 0, "videotoolbox", false), " ")
+	if !strings.Contains(vt, "videotoolbox_vld") || !strings.Contains(vt, "color_transfer=bt709") {
+		t.Errorf("no VideoToolbox tone mapping: %s", vt)
+	}
+	if sw := strings.Join(baseArgs(Plan{Video: "sdr"}, "f.mkv", 0, "none", false), " "); strings.Contains(sw, "scale_vt") {
+		t.Errorf("scale_vt without VideoToolbox: %s", sw)
 	}
 }
 

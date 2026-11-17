@@ -246,6 +246,20 @@ func startAtBeginning(b []byte) []byte {
 // ErrBusy reports that all transcoding slots are in use.
 var ErrBusy = errors.New("too many transcoding sessions")
 
+// HDR reports that the video of path uses a PQ or HLG transfer.
+func (s *Service) HDR(ctx context.Context, path string) bool {
+	if s.ffmpeg == "" {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	probe := filepath.Join(filepath.Dir(s.ffmpeg), "ffprobe")
+	out, _ := exec.CommandContext(ctx, probe, "-v", "error", "-select_streams", "v:0",
+		"-show_entries", "stream=color_transfer", "-of", "csv=p=0", path).Output()
+	t := strings.TrimSpace(string(out))
+	return t == "smpte2084" || t == "arib-std-b67"
+}
+
 // Keyframe returns the last video keyframe at or before t seconds. A copied video stream can only start
 // at a keyframe, so the player must know where it really begins to keep its clock and subtitles right.
 func (s *Service) Keyframe(ctx context.Context, path string, t float64) float64 {

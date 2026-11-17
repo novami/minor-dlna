@@ -19,7 +19,7 @@ type Media struct {
 // Plans are encoded into the stream URL (Key) so the streaming request does not depend on
 // the User-Agent of whichever player component fetches it.
 type Plan struct {
-	Video string // "" no change/none, "copy", "h264"
+	Video string // "" no change/none, "copy", "h264", "sdr" (H.264 tone-mapped from HDR)
 	Audio string // "" no change/none, "copy", "aac", "ac3", "flac"
 }
 
@@ -36,7 +36,7 @@ func orDash(s string) string {
 }
 
 var (
-	validVideo = newSet("x", "copy", "h264")
+	validVideo = newSet("x", "copy", "h264", "sdr")
 	validAudio = newSet("x", "copy", "aac", "ac3", "flac")
 )
 

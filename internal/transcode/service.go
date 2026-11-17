@@ -206,6 +206,9 @@ func baseArgs(p Plan, path string, start float64, hwaccel string, throttle bool)
 	if p.Video == "h264" && hwaccel == "videotoolbox" {
 		args = append(args, "-hwaccel", "videotoolbox")
 	}
+	if p.Video == "sdr" && hwaccel == "videotoolbox" {
+		args = append(args, "-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld")
+	}
 	args = append(args, "-i", path)
 
 	if p.Video == "" {
@@ -219,9 +222,14 @@ func baseArgs(p Plan, path string, start float64, hwaccel string, throttle bool)
 	switch p.Video {
 	case "copy":
 		args = append(args, "-c:v", "copy")
-	case "h264":
+	case "h264", "sdr":
 		// Cap at 1080p: sources needing H.264 are older formats, and it keeps encoding real-time.
-		args = append(args, "-vf", "scale=w='min(1920,iw)':h=-2,format=yuv420p")
+		vf := "scale=w='min(1920,iw)':h=-2,format=yuv420p"
+		if p.Video == "sdr" && hwaccel == "videotoolbox" {
+			// VideoToolbox tone-maps HDR to SDR; ffmpeg here has no zscale for the tonemap filter.
+			vf = "scale_vt=w='min(1920,iw)':h=-2:color_matrix=bt709:color_primaries=bt709:color_transfer=bt709"
+		}
+		args = append(args, "-vf", vf)
 		if hwaccel == "videotoolbox" {
 			args = append(args, "-c:v", "h264_videotoolbox", "-profile:v", "high", "-b:v", "10M", "-maxrate", "15M", "-bufsize", "20M")
 		} else {

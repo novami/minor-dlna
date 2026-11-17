@@ -29,7 +29,7 @@ function mediaStream(el) {
         el.src = info.src;
         if (at) el.addEventListener("loadedmetadata", () => { el.currentTime = at; }, { once: true });
       } else {
-        const r = await api("/api/play/start", { id: info.id, t: at, hevc: HEVC, hls: USE_HLS, stop: st.token });
+        const r = await api("/api/play/start", { id: info.id, t: at, hevc: HEVC, hls: USE_HLS, sdr: TOUCH && !matchMedia("(dynamic-range: high)").matches, stop: st.token });
         st.token = r.token || ""; st.offset = r.start;
         this.onopen?.(info, r.start);
         el.src = (TOUCH && r.master) || r.url;
