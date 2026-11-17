@@ -37,7 +37,7 @@ func (s *Server) registerPlayer(mux *http.ServeMux) {
 			T    float64 `json:"t"`
 			HEVC bool    `json:"hevc"`
 			HLS  bool    `json:"hls"`
-			SDR  bool    `json:"sdr"`  // iPhone/iPad, whose Safari plays no HDR over HLS
+			SDR  bool    `json:"sdr"`  // iPhone/iPad whose Safari shows no HDR video
 			Stop string  `json:"stop"` // the previous HLS session of this player
 		}
 		if json.NewDecoder(r.Body).Decode(&req) != nil {
@@ -56,8 +56,8 @@ func (s *Server) registerPlayer(mux *http.ServeMux) {
 			writeError(w, "Soubor se přehrává přímo.")
 			return
 		}
-		// iOS Safari drops an HDR variant silently, even on an HDR display (iPhone, iOS 18.7), so it gets
-		// tone-mapped SDR; H.264 from HDR would keep PQ colours and look washed out.
+		// iOS Safari drops an HDR variant silently when it reports no (video-dynamic-range: high), even on an
+		// HDR display, so it gets tone-mapped SDR; H.264 from HDR would keep PQ colours and look washed out.
 		var transfer string
 		if req.HLS && plan.Video != "" {
 			transfer = s.Transcode.Transfer(r.Context(), o.Path)
