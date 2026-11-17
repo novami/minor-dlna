@@ -207,12 +207,13 @@ func (h *HLS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, path)
 		return
 	}
-	// The first segment takes a moment; Safari gives up on an empty or missing playlist.
+	// The first segments take a moment; Safari gives up on an empty or missing playlist, and AVFoundation
+	// drops the variant of a live playlist much shorter than three target durations.
 	var b []byte
-	path = filepath.Join(sess.dir, "index.m3u8") // the master is built once the media playlist has a segment
+	path = filepath.Join(sess.dir, "index.m3u8") // the master is built once the media playlist has segments
 	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); {
 		var err error
-		if b, err = os.ReadFile(path); err == nil && strings.Contains(string(b), "#EXTINF") {
+		if b, err = os.ReadFile(path); err == nil && playlistReady(b) {
 			break
 		}
 		select {
@@ -232,6 +233,21 @@ func (h *HLS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, _ = w.Write(startAtBeginning(b))
+}
+
+// playlistReady reports a finished playlist or one listing at least 8 seconds, twice the segment length.
+func playlistReady(b []byte) bool {
+	if strings.Contains(string(b), "#EXT-X-ENDLIST") {
+		return true
+	}
+	var total float64
+	for _, l := range strings.Split(string(b), "\n") {
+		if d, ok := strings.CutPrefix(l, "#EXTINF:"); ok {
+			v, _ := strconv.ParseFloat(strings.TrimSuffix(strings.TrimSpace(d), ","), 64)
+			total += v
+		}
+	}
+	return total >= 8
 }
 
 // startAtBeginning: a growing EVENT playlist would otherwise start playing near its live end, skipping the film's start.

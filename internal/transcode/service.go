@@ -258,6 +258,8 @@ func baseArgs(p Plan, o library.Object, start float64, hwaccel string, throttle 
 		} else {
 			args = append(args, "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-profile:v", "high")
 		}
+		// Regular keyframes for HLS segments and seeking; VideoToolbox alone sets one every half second.
+		args = append(args, "-force_key_frames", "expr:gte(t,n_forced*2)", "-g", "600")
 	}
 	switch p.Audio {
 	case "copy":

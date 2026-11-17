@@ -37,7 +37,7 @@ func (s *Server) registerPlayer(mux *http.ServeMux) {
 			T    float64 `json:"t"`
 			HEVC bool    `json:"hevc"`
 			HLS  bool    `json:"hls"`
-			SDR  bool    `json:"sdr"`  // iPhone/iPad with an SDR display, which plays no HDR over HLS
+			SDR  bool    `json:"sdr"`  // iPhone/iPad, whose Safari plays no HDR over HLS
 			Stop string  `json:"stop"` // the previous HLS session of this player
 		}
 		if json.NewDecoder(r.Body).Decode(&req) != nil {
@@ -56,7 +56,8 @@ func (s *Server) registerPlayer(mux *http.ServeMux) {
 			writeError(w, "Soubor se přehrává přímo.")
 			return
 		}
-		// An SDR display needs HDR tone-mapped; H.264 from HDR would keep PQ colours and look washed out.
+		// iOS Safari drops an HDR variant silently, even on an HDR display (iPhone, iOS 18.7), so it gets
+		// tone-mapped SDR; H.264 from HDR would keep PQ colours and look washed out.
 		hdr := req.HLS && plan.Video != "" && s.Transcode.HDR(r.Context(), o.Path)
 		if hdr && (req.SDR || plan.Video == "h264") {
 			plan.Video = "sdr"
@@ -83,10 +84,9 @@ func (s *Server) registerPlayer(mux *http.ServeMux) {
 			}
 			return
 		}
-		// iOS needs the master playlist, but Safari on an SDR display drops its HDR variant (hence sdr above);
-		// a Mac with an SDR display gets the media playlist, which plays HDR.
+		// iOS needs the master playlist; a Mac gets the media playlist, which plays HDR also on an SDR display.
 		writeJSON(w, map[string]any{"url": "/hls/" + token + "/index.m3u8", "master": "/hls/" + token + "/master.m3u8",
-			"token": token, "start": start, "hdr": plan.Video == "copy" && hdr})
+			"token": token, "start": start})
 	})))
 	mux.Handle("POST /api/play/hls/stop", s.local(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
