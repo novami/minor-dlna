@@ -268,7 +268,7 @@ func startAtBeginning(b []byte) []byte {
 var ErrBusy = errors.New("too many transcoding sessions")
 
 // Transfer returns "smpte2084" (PQ) or "arib-std-b67" (HLG) for HDR video in path, otherwise "".
-// It reads the first frame, as files tagged only in the bitstream show no transfer on the stream.
+// It reads the stream and its first frame, as a file may carry the tag only in the container or only in the bitstream.
 func (s *Service) Transfer(ctx context.Context, path string) string {
 	if s.ffmpeg == "" {
 		return ""
@@ -277,10 +277,12 @@ func (s *Service) Transfer(ctx context.Context, path string) string {
 	defer cancel()
 	probe := filepath.Join(filepath.Dir(s.ffmpeg), "ffprobe")
 	out, _ := exec.CommandContext(ctx, probe, "-v", "error", "-select_streams", "v:0", "-read_intervals", "%+#1",
-		"-show_entries", "frame=color_transfer", "-of", "csv=p=0", path).Output()
-	switch t := strings.Trim(strings.TrimSpace(string(out)), ","); t {
-	case "smpte2084", "arib-std-b67":
-		return t
+		"-show_entries", "stream=color_transfer:frame=color_transfer", "-of", "csv=p=0", path).Output()
+	for _, t := range strings.FieldsFunc(string(out), func(r rune) bool { return r == ',' || r == '\n' || r == '\r' }) {
+		switch t = strings.TrimSpace(t); t {
+		case "smpte2084", "arib-std-b67":
+			return t
+		}
 	}
 	return ""
 }
