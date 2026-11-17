@@ -74,7 +74,7 @@ func TestServe(t *testing.T) {
 			t.Errorf("%s: %d", bad, r.StatusCode)
 		}
 	}
-	if a := strings.Join(Args(Plan{"h264", "aac"}, "in", 0, "videotoolbox"), " "); !strings.Contains(a, "-hwaccel videotoolbox") || !strings.Contains(a, "h264_videotoolbox") {
+	if a := strings.Join(Args(Plan{"h264", "aac"}, library.Object{Path: "in", VideoCodec: "h264"}, 0, "videotoolbox"), " "); !strings.Contains(a, "-hwaccel videotoolbox") || !strings.Contains(a, "h264_videotoolbox") {
 		t.Fatalf("videotoolbox args: %s", a)
 	}
 }

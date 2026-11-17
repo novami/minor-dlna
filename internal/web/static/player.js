@@ -12,7 +12,7 @@ const USE_HLS =!!probe.canPlayType("application/vnd.apple.mpegurl") && /AppleWeb
 
 // A media element with an absolute timeline over direct or restarted streams.
 function mediaStream(el) {
-  const st = { info: null, offset: 0, token: "", retried: false };
+  const st = { info: null, offset: 0, token: "", retried: false, sdr: false, hdr: false };
   const stopHLS = () => {
     if (st.token) fetch("/api/play/hls/stop", { method: "POST", keepalive: true, headers: { "Content-Type": "application/json", "X-MinorDLNA": "1" }, body: JSON.stringify({ token: st.token }) }).catch(() => {});
     st.token = "";
@@ -20,6 +20,7 @@ function mediaStream(el) {
   return {
     st,
     async open(info, at, retry) {
+      if (info !== st.info) st.sdr = TOUCH && !matchMedia("(dynamic-range: high)").matches;
       st.info = info; st.retried = !!retry;
       at = Math.max(0, at || 0);
       if (info.direct) {
@@ -29,10 +30,17 @@ function mediaStream(el) {
         el.src = info.src;
         if (at) el.addEventListener("loadedmetadata", () => { el.currentTime = at; }, { once: true });
       } else {
-        const r = await api("/api/play/start", { id: info.id, t: at, hevc: HEVC, hls: USE_HLS, sdr: TOUCH && !matchMedia("(dynamic-range: high)").matches, stop: st.token });
-        st.token = r.token || ""; st.offset = r.start;
+        const r = await api("/api/play/start", { id: info.id, t: at, hevc: HEVC, hls: USE_HLS, sdr: st.sdr, stop: st.token });
+        st.token = r.token || ""; st.offset = r.start; st.hdr = !!r.hdr;
         this.onopen?.(info, r.start);
         el.src = (TOUCH && r.master) || r.url;
+        // iOS may drop the HDR variant silently, without an error; then it gets tone-mapped SDR.
+        if (TOUCH && st.hdr) {
+          const tok = st.token;
+          el.addEventListener("play", () => setTimeout(() => {
+            if (st.token === tok && !el.currentTime) this.toSDR();
+          }, 10000), { once: true });
+        }
       }
       await el.play().catch((e) => { if (e.name === "NotAllowedError") this.onblocked?.(); });
     },
@@ -44,9 +52,15 @@ function mediaStream(el) {
       if (st.info.direct) el.currentTime = t;
       else this.open(st.info, t);
     },
+    toSDR() {
+      st.sdr = true;
+      this.open(st.info, this.abs(), true).catch(() => {});
+    },
     // A converted stream may die (server restart, idle HLS session); continue once from where it stopped.
     recover() {
-      if (!st.info || st.info.direct || st.retried) return false;
+      if (!st.info || st.info.direct) return false;
+      if (TOUCH && st.hdr && !st.sdr) { this.toSDR(); return true; }
+      if (st.retried) return false;
       this.open(st.info, this.abs(), true).catch(() => {});
       return true;
     },

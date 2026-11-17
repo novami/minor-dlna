@@ -113,7 +113,7 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.pipe(w, r, o, Args(plan, o.Path, start, s.hwaccel), plan.Key(), start)
+	s.pipe(w, r, o, Args(plan, o, start, s.hwaccel), plan.Key(), start)
 }
 
 // pipe runs ffmpeg and streams its output; it answers 503 when all transcoding slots stay busy.
@@ -185,17 +185,26 @@ func (s *Service) Active() int {
 }
 
 // Args builds the ffmpeg command line for a plan streamed to a TV (MPEG-TS, or FLAC for audio).
-func Args(p Plan, path string, start float64, hwaccel string) []string {
-	args := baseArgs(p, path, start, hwaccel, false)
+func Args(p Plan, o library.Object, start float64, hwaccel string) []string {
+	args := baseArgs(p, o, start, hwaccel, false)
 	if p.Video == "" {
 		return append(args, "-f", "flac", "pipe:1")
 	}
 	return append(args, "-sn", "-dn", "-f", "mpegts", "-muxdelay", "0", "-muxpreload", "0", "pipe:1")
 }
 
+// vtDecodes reports what VideoToolbox decodes on every Apple Silicon Mac. Other codecs mostly fall back
+// to software on their own, but AV1 before M3 fails outright, and tone mapping needs certainty.
+func vtDecodes(o library.Object) bool {
+	return o.VideoCodec == "hevc" || (o.VideoCodec == "h264" && !is10Bit(o.PixFmt))
+}
+
+// sdrFilter scales to 1080p and tone-maps HDR to SDR in VideoToolbox, as this ffmpeg has no zscale.
+const sdrFilter = "scale_vt=w='min(1920,iw)':h=-2:color_matrix=bt709:color_primaries=bt709:color_transfer=bt709"
+
 // baseArgs covers input, stream selection and codecs; the caller adds the muxer.
 // throttle limits reading to twice real time, for outputs written to disk instead of a pipe.
-func baseArgs(p Plan, path string, start float64, hwaccel string, throttle bool) []string {
+func baseArgs(p Plan, o library.Object, start float64, hwaccel string, throttle bool) []string {
 	args := []string{"-nostdin", "-hide_banner", "-v", "error", "-fflags", "+genpts"}
 	if throttle {
 		args = append(args, "-readrate", "2", "-readrate_initial_burst", "60")
@@ -203,13 +212,18 @@ func baseArgs(p Plan, path string, start float64, hwaccel string, throttle bool)
 	if start > 0 {
 		args = append(args, "-ss", strconv.FormatFloat(start, 'f', 3, 64))
 	}
-	if p.Video == "h264" && hwaccel == "videotoolbox" {
+	hwFrames := false // decoded frames stay in VideoToolbox
+	switch {
+	case p.Video == "h264" && hwaccel == "videotoolbox" && vtDecodes(o):
 		args = append(args, "-hwaccel", "videotoolbox")
-	}
-	if p.Video == "sdr" && hwaccel == "videotoolbox" {
+	case p.Video == "sdr" && hwaccel == "videotoolbox" && vtDecodes(o):
 		args = append(args, "-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld")
+		hwFrames = true
+	case p.Video == "sdr":
+		// Tone mapping needs VideoToolbox even with hardware acceleration off; frames are uploaded to it.
+		args = append(args, "-init_hw_device", "videotoolbox=vt", "-filter_hw_device", "vt")
 	}
-	args = append(args, "-i", path)
+	args = append(args, "-i", o.Path)
 
 	if p.Video == "" {
 		args = append(args, "-map", "0:a:0", "-vn")
@@ -225,9 +239,14 @@ func baseArgs(p Plan, path string, start float64, hwaccel string, throttle bool)
 	case "h264", "sdr":
 		// Cap at 1080p: sources needing H.264 are older formats, and it keeps encoding real-time.
 		vf := "scale=w='min(1920,iw)':h=-2,format=yuv420p"
-		if p.Video == "sdr" && hwaccel == "videotoolbox" {
-			// VideoToolbox tone-maps HDR to SDR; ffmpeg here has no zscale for the tonemap filter.
-			vf = "scale_vt=w='min(1920,iw)':h=-2:color_matrix=bt709:color_primaries=bt709:color_transfer=bt709"
+		if p.Video == "sdr" {
+			vf = sdrFilter
+			if !hwFrames {
+				vf = "format=p010le,hwupload," + vf
+			}
+			if hwaccel != "videotoolbox" {
+				vf += ",hwdownload,format=p010le,format=yuv420p"
+			}
 		}
 		args = append(args, "-vf", vf)
 		if hwaccel == "videotoolbox" {

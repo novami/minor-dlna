@@ -3,6 +3,8 @@ package transcode
 import (
 	"strings"
 	"testing"
+
+	"github.com/novami/minor-dlna/internal/library"
 )
 
 func TestDecide(t *testing.T) {
@@ -50,12 +52,18 @@ func TestKey(t *testing.T) {
 }
 
 func TestSDRArgs(t *testing.T) {
-	vt := strings.Join(baseArgs(Plan{Video: "sdr"}, "f.mkv", 0, "videotoolbox", false), " ")
-	if !strings.Contains(vt, "videotoolbox_vld") || !strings.Contains(vt, "color_transfer=bt709") {
-		t.Errorf("no VideoToolbox tone mapping: %s", vt)
+	args := func(codec, hwaccel string) string {
+		return strings.Join(baseArgs(Plan{Video: "sdr"}, library.Object{Path: "f.mkv", VideoCodec: codec}, 0, hwaccel, false), " ")
 	}
-	if sw := strings.Join(baseArgs(Plan{Video: "sdr"}, "f.mkv", 0, "none", false), " "); strings.Contains(sw, "scale_vt") {
-		t.Errorf("scale_vt without VideoToolbox: %s", sw)
+	if a := args("hevc", "videotoolbox"); !strings.Contains(a, "videotoolbox_vld") || strings.Contains(a, "hwupload") {
+		t.Errorf("HEVC not tone-mapped on VideoToolbox frames: %s", a)
+	}
+	// VideoToolbox does not decode AV1 before M3, and fails instead of falling back.
+	if a := args("av1", "videotoolbox"); strings.Contains(a, "-hwaccel ") || !strings.Contains(a, "hwupload,scale_vt") {
+		t.Errorf("AV1 not decoded in software: %s", a)
+	}
+	if a := args("hevc", "none"); !strings.Contains(a, "libx264") || !strings.Contains(a, "hwdownload") {
+		t.Errorf("tone mapping without hardware encoding: %s", a)
 	}
 }
 

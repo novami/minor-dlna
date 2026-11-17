@@ -30,7 +30,7 @@ func (s *Server) registerPlayer(mux *http.ServeMux) {
 		}
 		s.Transcode.ServeMP4(w, r, o, plan, seconds(r.URL.Query().Get("t")))
 	})))
-	// start positions a converted stream: at the keyframe before t when the video is copied, as HLS for Safari.
+	// start positions a converted stream: at the keyframe before t when a stream is copied, as HLS for Safari.
 	mux.Handle("POST /api/play/start", s.local(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			ID   string  `json:"id"`
@@ -56,11 +56,14 @@ func (s *Server) registerPlayer(mux *http.ServeMux) {
 			writeError(w, "Soubor se přehrává přímo.")
 			return
 		}
-		if req.SDR && req.HLS && s.Transcode.HDR(r.Context(), o.Path) {
+		// An SDR display needs HDR tone-mapped; H.264 from HDR would keep PQ colours and look washed out.
+		hdr := req.HLS && plan.Video != "" && s.Transcode.HDR(r.Context(), o.Path)
+		if hdr && (req.SDR || plan.Video == "h264") {
 			plan.Video = "sdr"
 		}
 		start := max(req.T, 0)
-		if plan.Video == "copy" {
+		// Copied streams start at the keyframe before t; converted video would start later than copied audio.
+		if plan.Video == "copy" || plan.Audio == "copy" {
 			start = s.Transcode.Keyframe(r.Context(), o.Path, start)
 		}
 		if !req.HLS {
@@ -83,7 +86,7 @@ func (s *Server) registerPlayer(mux *http.ServeMux) {
 		// iOS needs the master playlist, but Safari on an SDR display drops its HDR variant (hence sdr above);
 		// a Mac with an SDR display gets the media playlist, which plays HDR.
 		writeJSON(w, map[string]any{"url": "/hls/" + token + "/index.m3u8", "master": "/hls/" + token + "/master.m3u8",
-			"token": token, "start": start})
+			"token": token, "start": start, "hdr": plan.Video == "copy" && hdr})
 	})))
 	mux.Handle("POST /api/play/hls/stop", s.local(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {

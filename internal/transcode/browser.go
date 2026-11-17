@@ -66,7 +66,7 @@ func browserMux(args []string, p Plan, srcHEVC bool) []string {
 
 // ServeMP4 streams item o as fragmented MP4 from start seconds. Seeking is a new request with another start.
 func (s *Service) ServeMP4(w http.ResponseWriter, r *http.Request, o library.Object, p Plan, start float64) {
-	args := browserMux(baseArgs(p, o.Path, start, s.hwaccel, false), p, o.VideoCodec == "hevc")
+	args := browserMux(baseArgs(p, o, start, s.hwaccel, false), p, o.VideoCodec == "hevc")
 	args = append(args, "-f", "mp4", "-movflags", "frag_keyframe+empty_moov+default_base_moof", "pipe:1")
 	if p.Video == "" {
 		w.Header().Set("Content-Type", "audio/mp4")
@@ -113,7 +113,7 @@ func (h *HLS) Start(ctx context.Context, o library.Object, p Plan, start float64
 		release()
 		return "", err
 	}
-	args := browserMux(baseArgs(p, o.Path, start, h.svc.hwaccel, true), p, o.VideoCodec == "hevc")
+	args := browserMux(baseArgs(p, o, start, h.svc.hwaccel, true), p, o.VideoCodec == "hevc")
 	args = append(args, "-f", "hls", "-hls_time", "4", "-hls_list_size", "0", "-hls_playlist_type", "event",
 		"-hls_segment_type", "fmp4", "-hls_flags", "independent_segments+temp_file",
 		"-hls_fmp4_init_filename", "init.mp4", "-hls_segment_filename", filepath.Join(dir, "s%05d.m4s"),
