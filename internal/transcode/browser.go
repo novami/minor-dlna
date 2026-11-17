@@ -100,9 +100,10 @@ func NewHLS(svc *Service, dir string) *HLS {
 }
 
 // Start launches ffmpeg for item o from start seconds and returns the session token.
-// transfer is the HDR transfer of o from Transfer; copied video gets it written into the stream,
-// as a file tagged only in its bitstream would otherwise reach the player marked SDR.
-func (h *HLS) Start(ctx context.Context, o library.Object, p Plan, start float64, transfer string) (string, error) {
+// hdr comes from ProbeHDR; copied video gets its transfer written into the stream, as a file tagged only
+// in its bitstream would otherwise reach the player marked SDR. Dolby Vision profile 5 is copied as dvh1
+// with its configuration box, which a player needs to show it at all.
+func (h *HLS) Start(ctx context.Context, o library.Object, p Plan, start float64, hdr HDR) (string, error) {
 	release, ok := h.svc.acquire(ctx, o.Title)
 	if !ok {
 		return "", ErrBusy
@@ -115,10 +116,14 @@ func (h *HLS) Start(ctx context.Context, o library.Object, p Plan, start float64
 		release()
 		return "", err
 	}
-	args := browserMux(baseArgs(p, o, start, h.svc.hwaccel, true), p, o.VideoCodec == "hevc")
-	if p.Video == "copy" && transfer != "" {
-		args = append(args, "-color_primaries", "bt2020", "-color_trc", transfer, "-colorspace", "bt2020nc")
+	args := baseArgs(p, o, start, h.svc.hwaccel, true)
+	switch {
+	case p.Video == "copy" && hdr.DV5():
+		args = append(args, "-tag:v", "dvh1", "-strict", "unofficial")
+	case p.Video == "copy" && hdr.Transfer != "":
+		args = append(args, "-color_primaries", "bt2020", "-color_trc", hdr.Transfer, "-colorspace", "bt2020nc")
 	}
+	args = browserMux(args, p, o.VideoCodec == "hevc" && !hdr.DV5())
 	args = append(args, "-f", "hls", "-hls_time", "4", "-hls_list_size", "0", "-hls_playlist_type", "event",
 		"-hls_segment_type", "fmp4", "-hls_flags", "independent_segments+temp_file",
 		"-hls_fmp4_init_filename", "init.mp4", "-hls_segment_filename", filepath.Join(dir, "s%05d.m4s"),
@@ -267,24 +272,42 @@ func startAtBeginning(b []byte) []byte {
 // ErrBusy reports that all transcoding slots are in use.
 var ErrBusy = errors.New("too many transcoding sessions")
 
-// Transfer returns "smpte2084" (PQ) or "arib-std-b67" (HLG) for HDR video in path, otherwise "".
-// It reads the stream and its first frame, as a file may carry the tag only in the container or only in the bitstream.
-func (s *Service) Transfer(ctx context.Context, path string) string {
+// HDR describes the dynamic range of a video.
+type HDR struct {
+	Transfer  string // "smpte2084" (PQ), "arib-std-b67" (HLG) or "" for SDR
+	DVProfile int    // Dolby Vision profile, 0 without it
+}
+
+// DV5 reports Dolby Vision profile 5, whose picture has no usable form without DV processing:
+// tone mapping or a player that ignores the DV metadata shows it green and purple.
+func (h HDR) DV5() bool { return h.DVProfile == 5 }
+
+// ProbeHDR reads the HDR transfer and the Dolby Vision profile of the video in path. It reads the stream and
+// its first frame, as a file may carry the transfer tag only in the container or only in the bitstream.
+func (s *Service) ProbeHDR(ctx context.Context, path string) HDR {
+	var h HDR
 	if s.ffmpeg == "" {
-		return ""
+		return h
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	probe := filepath.Join(filepath.Dir(s.ffmpeg), "ffprobe")
 	out, _ := exec.CommandContext(ctx, probe, "-v", "error", "-select_streams", "v:0", "-read_intervals", "%+#1",
-		"-show_entries", "stream=color_transfer:frame=color_transfer", "-of", "csv=p=0", path).Output()
-	for _, t := range strings.FieldsFunc(string(out), func(r rune) bool { return r == ',' || r == '\n' || r == '\r' }) {
-		switch t = strings.TrimSpace(t); t {
-		case "smpte2084", "arib-std-b67":
-			return t
+		"-show_entries", "stream=color_transfer:stream_side_data=dv_profile:frame=color_transfer",
+		"-of", "default=nw=1", path).Output()
+	for _, line := range strings.Split(string(out), "\n") {
+		k, v, _ := strings.Cut(strings.TrimSpace(line), "=")
+		switch {
+		case k == "color_transfer" && (v == "smpte2084" || v == "arib-std-b67"):
+			h.Transfer = v
+		case k == "dv_profile":
+			h.DVProfile, _ = strconv.Atoi(v)
 		}
 	}
-	return ""
+	if h.DV5() {
+		h.Transfer = "smpte2084" // its base layer is IPT-PQ, tagged unspecified or not at all
+	}
+	return h
 }
 
 // Keyframe returns the last video keyframe at or before t seconds. A copied video stream can only start

@@ -36,6 +36,7 @@ func (s *Server) registerPlayer(mux *http.ServeMux) {
 			ID   string  `json:"id"`
 			T    float64 `json:"t"`
 			HEVC bool    `json:"hevc"`
+			DV   bool    `json:"dv"` // the browser decodes Dolby Vision profile 5
 			HLS  bool    `json:"hls"`
 			SDR  bool    `json:"sdr"`  // iPhone/iPad whose Safari shows no HDR video
 			Stop string  `json:"stop"` // the previous HLS session of this player
@@ -58,11 +59,15 @@ func (s *Server) registerPlayer(mux *http.ServeMux) {
 		}
 		// iOS Safari drops an HDR variant silently when it reports no (video-dynamic-range: high), even on an
 		// HDR display, so it gets tone-mapped SDR; H.264 from HDR would keep PQ colours and look washed out.
-		var transfer string
+		var hdr transcode.HDR
 		if req.HLS && plan.Video != "" {
-			transfer = s.Transcode.Transfer(r.Context(), o.Path)
+			hdr = s.Transcode.ProbeHDR(r.Context(), o.Path)
 		}
-		if transfer != "" && (req.SDR || plan.Video == "h264") {
+		if hdr.DV5() && (req.SDR || !req.DV || plan.Video != "copy") {
+			writeError(w, dv5Unsupported)
+			return
+		}
+		if hdr.Transfer != "" && (req.SDR || plan.Video == "h264") {
 			plan.Video = "sdr"
 		}
 		start := max(req.T, 0)
@@ -78,7 +83,7 @@ func (s *Server) registerPlayer(mux *http.ServeMux) {
 			writeJSON(w, map[string]any{"url": url, "start": start})
 			return
 		}
-		token, err := s.HLS.Start(r.Context(), o, plan, start, transfer)
+		token, err := s.HLS.Start(r.Context(), o, plan, start, hdr)
 		if err != nil {
 			if err == transcode.ErrBusy {
 				writeError(w, "Server právě převádí jiná videa, zkuste to za chvíli.")
@@ -152,6 +157,10 @@ func (s *Server) playInfo(w http.ResponseWriter, r *http.Request) {
 	if o.Format.Kind == dlna.Audio {
 		p.Kind = "audio"
 	}
+	if o.VideoCodec == "hevc" && r.URL.Query().Get("dv") != "1" && s.Transcode != nil && s.Transcode.ProbeHDR(r.Context(), o.Path).DV5() {
+		writeError(w, dv5Unsupported)
+		return
+	}
 	if !p.Direct {
 		p.Src = "/api/play/" + strings.TrimPrefix(o.ID, "I") + "/stream.mp4"
 	}
@@ -160,6 +169,9 @@ func (s *Server) playInfo(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, p)
 }
+
+// No conversion keeps the colours of Dolby Vision profile 5 without libplacebo, which ffmpeg here lacks.
+const dv5Unsupported = "Video je v Dolby Vision profilu 5, který tento prohlížeč neumí. Přehrajte ho na televizi."
 
 // playable loads a video or audio item by its number and decides how the browser gets it.
 func (s *Server) playable(w http.ResponseWriter, r *http.Request, num string, hevc bool) (library.Object, transcode.Plan, bool) {

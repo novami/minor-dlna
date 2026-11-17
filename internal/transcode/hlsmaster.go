@@ -73,7 +73,7 @@ func initInfo(path string) streamInfo {
 		}
 		kind, body := string(entry[4:8]), entry[8:size]
 		switch kind {
-		case "avc1", "avc3", "hvc1", "hev1":
+		case "avc1", "avc3", "hvc1", "hev1", "dvh1", "dvhe":
 			if len(body) < 78 { // VisualSampleEntry fields before its child boxes
 				continue
 			}
@@ -82,6 +82,11 @@ func initInfo(path string) streamInfo {
 			if kind[0] == 'a' {
 				if c := child(kids, "avcC"); len(c) >= 4 {
 					info.codecs = append(info.codecs, fmt.Sprintf("%s.%02x%02x%02x", kind, c[1], c[2], c[3]))
+				}
+			} else if kind[0] == 'd' {
+				if c := dvConfig(kids); len(c) >= 4 {
+					info.codecs = append(info.codecs, dvCodec(kind, c))
+					info.videoRange = "PQ"
 				}
 			} else if c := child(kids, "hvcC"); len(c) >= 13 {
 				info.codecs = append(info.codecs, hevcCodec(kind, c))
@@ -103,6 +108,20 @@ func initInfo(path string) streamInfo {
 		}
 	}
 	return info
+}
+
+// dvConfig returns the Dolby Vision configuration record of a sample entry.
+func dvConfig(kids []byte) []byte {
+	if c := child(kids, "dvcC"); c != nil {
+		return c
+	}
+	return child(kids, "dvvC")
+}
+
+// dvCodec formats a Dolby Vision configuration record, e.g. dvh1.05.06; it holds the profile in 7 bits
+// and the level in 6 bits after the version bytes.
+func dvCodec(kind string, c []byte) string {
+	return fmt.Sprintf("%s.%02d.%02d", kind, c[2]>>1, (c[2]&1)<<5|c[3]>>3)
 }
 
 // hevcCodec formats an HEVCDecoderConfigurationRecord as in RFC 6381, e.g. hvc1.2.4.L153.B0.

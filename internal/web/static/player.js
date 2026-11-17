@@ -9,6 +9,8 @@ const HEVC = !!probe.canPlayType('video/mp4; codecs="hvc1.1.6.L120.90"');
 const UA = navigator.userAgent;
 const TOUCH = navigator.maxTouchPoints > 1; // iPhone and iPad, also with a desktop user agent
 const USE_HLS =!!probe.canPlayType("application/vnd.apple.mpegurl") && /AppleWebKit/.test(UA) && !/Chrome|Chromium|Edg|Android/.test(UA);
+// Dolby Vision profile 5 keeps its colours only in HLS, where the server copies it with its DV configuration.
+const DV = USE_HLS && !!probe.canPlayType('video/mp4; codecs="dvh1.05.06"');
 
 // A media element with an absolute timeline over direct or restarted streams.
 function mediaStream(el) {
@@ -29,7 +31,7 @@ function mediaStream(el) {
         el.src = info.src;
         if (at) el.addEventListener("loadedmetadata", () => { el.currentTime = at; }, { once: true });
       } else {
-        const r = await api("/api/play/start", { id: info.id, t: at, hevc: HEVC, hls: USE_HLS, sdr: TOUCH && !matchMedia("(video-dynamic-range: high)").matches, stop: st.token });
+        const r = await api("/api/play/start", { id: info.id, t: at, hevc: HEVC, dv: DV, hls: USE_HLS, sdr: TOUCH && !matchMedia("(video-dynamic-range: high)").matches, stop: st.token });
         st.token = r.token || ""; st.offset = r.start;
         this.onopen?.(info, r.start);
         el.src = (TOUCH && r.master) || r.url;
@@ -65,7 +67,7 @@ const savePosition = (id, posMs, durMs, keepalive) => fetch("/api/position", {
   body: JSON.stringify({ id, position_ms: Math.round(posMs), duration_ms: Math.round(durMs || 0) }),
 }).catch(() => {});
 
-const playInfo = (id) => api(`/api/play?id=${encodeURIComponent(id)}${HEVC ? "&hevc=1" : ""}`);
+const playInfo = (id) => api(`/api/play?id=${encodeURIComponent(id)}${HEVC ? "&hevc=1" : ""}${DV ? "&dv=1" : ""}`);
 
 // ---------- video ----------
 
