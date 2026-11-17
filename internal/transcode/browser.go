@@ -186,7 +186,7 @@ func (h *HLS) reap() {
 	}
 }
 
-var hlsFile = regexp.MustCompile(`^(index\.m3u8|init\.mp4|s\d{5,6}\.m4s)$`)
+var hlsFile = regexp.MustCompile(`^(master\.m3u8|index\.m3u8|init\.mp4|s\d{5,6}\.m4s)$`)
 
 // ServeHTTP serves /<token>/<file>. The random token is the access check: Safari's media player may not send cookies.
 func (h *HLS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -202,13 +202,14 @@ func (h *HLS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path := filepath.Join(sess.dir, name)
-	if name != "index.m3u8" {
+	if !strings.HasSuffix(name, ".m3u8") {
 		w.Header().Set("Content-Type", "video/mp4")
 		http.ServeFile(w, r, path)
 		return
 	}
 	// The first segment takes a moment; Safari gives up on an empty or missing playlist.
 	var b []byte
+	path = filepath.Join(sess.dir, "index.m3u8") // the master is built once the media playlist has a segment
 	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); {
 		var err error
 		if b, err = os.ReadFile(path); err == nil && strings.Contains(string(b), "#EXTINF") {
@@ -226,6 +227,10 @@ func (h *HLS) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/vnd.apple.mpegurl")
 	w.Header().Set("Cache-Control", "no-cache")
+	if name == "master.m3u8" {
+		_, _ = w.Write(masterPlaylist(sess.dir, b))
+		return
+	}
 	_, _ = w.Write(startAtBeginning(b))
 }
 

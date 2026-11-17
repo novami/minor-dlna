@@ -7,7 +7,8 @@
 const probe = document.createElement("video");
 const HEVC = !!probe.canPlayType('video/mp4; codecs="hvc1.1.6.L120.90"');
 const UA = navigator.userAgent;
-const USE_HLS = !!probe.canPlayType("application/vnd.apple.mpegurl") && /AppleWebKit/.test(UA) && !/Chrome|Chromium|Edg|Android/.test(UA);
+const TOUCH = navigator.maxTouchPoints > 1; // iPhone and iPad, also with a desktop user agent
+const USE_HLS =!!probe.canPlayType("application/vnd.apple.mpegurl") && /AppleWebKit/.test(UA) && !/Chrome|Chromium|Edg|Android/.test(UA);
 
 // A media element with an absolute timeline over direct or restarted streams.
 function mediaStream(el) {
@@ -31,7 +32,7 @@ function mediaStream(el) {
         const r = await api("/api/play/start", { id: info.id, t: at, hevc: HEVC, hls: USE_HLS, stop: st.token });
         st.token = r.token || ""; st.offset = r.start;
         this.onopen?.(info, r.start);
-        el.src = r.url;
+        el.src = (TOUCH && r.master) || r.url;
       }
       await el.play().catch((e) => { if (e.name === "NotAllowedError") this.onblocked?.(); });
     },

@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -400,6 +401,29 @@ func withCommon(cfg *config.Config, serverName string, next http.Handler) http.H
 		}
 		w.Header().Set("Server", serverName)
 		slog.Debug("http", "method", r.Method, "path", r.URL.Path, "remote", r.RemoteAddr, "ua", r.UserAgent())
-		next.ServeHTTP(w, r)
+		if !strings.HasPrefix(r.URL.Path, "/hls/") || !slog.Default().Enabled(r.Context(), slog.LevelDebug) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		rw := &countingWriter{ResponseWriter: w, status: http.StatusOK}
+		start := time.Now()
+		next.ServeHTTP(rw, r)
+		slog.Debug("hls served", "path", r.URL.Path, "range", r.Header.Get("Range"), "status", rw.status,
+			"bytes", rw.n, "took", time.Since(start).Round(time.Millisecond), "aborted", r.Context().Err() != nil)
 	})
+}
+
+// countingWriter records the status and body size of a response for debug logs.
+type countingWriter struct {
+	http.ResponseWriter
+	status int
+	n      int64
+}
+
+func (c *countingWriter) WriteHeader(code int) { c.status = code; c.ResponseWriter.WriteHeader(code) }
+
+func (c *countingWriter) Write(b []byte) (int, error) {
+	n, err := c.ResponseWriter.Write(b)
+	c.n += int64(n)
+	return n, err
 }

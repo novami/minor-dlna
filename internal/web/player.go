@@ -76,7 +76,9 @@ func (s *Server) registerPlayer(mux *http.ServeMux) {
 			}
 			return
 		}
-		writeJSON(w, map[string]any{"url": "/hls/" + token + "/index.m3u8", "token": token, "start": start})
+		// iOS needs the master playlist, but Safari on an SDR display drops its HDR variant and plays nothing.
+		writeJSON(w, map[string]any{"url": "/hls/" + token + "/index.m3u8", "master": "/hls/" + token + "/master.m3u8",
+			"token": token, "start": start})
 	})))
 	mux.Handle("POST /api/play/hls/stop", s.local(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req struct {
