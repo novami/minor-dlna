@@ -96,6 +96,10 @@ func (s *Service) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		start = from
+		// A copied stream starts at the keyframe before; the other one is cut to match, and the reply says so.
+		if plan.Video != "" && (plan.Video == "copy" || plan.Audio == "copy") {
+			start = s.Keyframe(r.Context(), o.Path, start)
+		}
 		if dur > 0 {
 			h["TimeSeekRange.dlna.org"] = []string{fmt.Sprintf("npt=%.3f-%.3f/%.3f", start, dur, dur)}
 		}
