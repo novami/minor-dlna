@@ -61,10 +61,9 @@ type Remote struct {
 	PasswordHash string `yaml:"password_hash"` // bcrypt
 }
 
-// Metadata looks up movies and shows on Wikidata and, with a token, on TMDb.
+// Metadata looks up movies and shows on Wikidata.
 type Metadata struct {
-	Enabled   *bool  `yaml:"enabled"`    // default true
-	TMDbToken string `yaml:"tmdb_token"` // TMDb API Read Access Token, empty = Wikidata only
+	Enabled *bool `yaml:"enabled"` // default true
 }
 
 // On defaults to true.

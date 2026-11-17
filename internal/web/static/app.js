@@ -57,7 +57,6 @@ async function load() {
     auto_update: state.auto_update,
     menubar: state.menubar,
     metadata: state.metadata,
-    tmdb_token: null, // null = keep the saved token
     remote: state.remote,
     password: "",
   };
@@ -514,7 +513,6 @@ function settings() {
       ${toggle("auto_update", "Automatické aktualizace", "Nové verze se nainstalují samy, nikdy během přehrávání.")}
       ${state.in_app ? toggle("menubar", "Ikona v řádku nabídek", "Ukazuje, že server běží, a nabízí rychlé volby: správa, knihovna, prohledání, aktualizace, ukončení.") : ""}
       ${toggle("metadata", "Názvy, popisy a plakáty filmů", "Hledá filmy a seriály na Wikidatech a Wikipedii (posílá tam jejich názvy). Bez klíče a zdarma.")}
-      ${draft.metadata ? tmdbField() : ""}
       ${toggle("remote", "Přístup z jiných zařízení", "Správa chráněná heslem. " + remoteHint)}
       ${draft.remote ? `<label class="field">${state.remote ? "Nové heslo (prázdné = ponechat)" : "Heslo (aspoň 8 znaků)"}</label>
         <input type="password" autocomplete="new-password" value="${esc(draft.password)}" oninput="draft.password=this.value">` : ""}
@@ -570,19 +568,9 @@ window.setClientProfile = async (ip, profile) => {
   }
 };
 
-function tmdbField() {
-  if (draft.tmdb_token === "" && state.tmdb) {
-    return `<p class="hint">TMDb token se po uložení odebere. <button class="link" onclick="draft.tmdb_token=null;render()">Ponechat</button></p>`;
-  }
-  return `<label class="field">TMDb token (nepovinné – víc plakátů a delší české popisy)</label>
-    <input type="password" autocomplete="off" placeholder="${state.tmdb ? "Token je uložen, prázdné = ponechat" : "API Read Access Token z themoviedb.org"}"
-      value="${esc(draft.tmdb_token || "")}" oninput="draft.tmdb_token=this.value||null">
-    ${state.tmdb ? `<button class="link" onclick="draft.tmdb_token='';render()">Odebrat token</button>` : ""}`;
-}
-
 // ---------- movie metadata ----------
 
-let meta = null;       // { items, tmdb }
+let meta = null;       // { items }
 let metaEdit = null;   // { id, q, results, busy }
 
 function metaStatus(e) {
@@ -593,7 +581,7 @@ function metaStatus(e) {
 
 function metaCard() {
   const head = `<h2>Metadata filmů a seriálů</h2>
-    <p class="hint">Údaje z <a href="https://www.wikidata.org" target="_blank" rel="noopener">Wikidat</a> (CC0) a <a href="https://cs.wikipedia.org" target="_blank" rel="noopener">Wikipedie</a> (CC BY-SA)${meta?.tmdb ? `, plakáty a popisy z <a href="https://www.themoviedb.org" target="_blank" rel="noopener">TMDb</a>. Tento produkt používá TMDb API, ale není TMDb podporován ani certifikován` : ""}.</p>`;
+    <p class="hint">Údaje z <a href="https://www.wikidata.org" target="_blank" rel="noopener">Wikidat</a> (CC0) a <a href="https://cs.wikipedia.org" target="_blank" rel="noopener">Wikipedie</a> (CC BY-SA).</p>`;
   if (!meta) return head + `<p class="hint">Načítám…</p>`;
   if (!meta.items.length) return head + `<p class="hint">Zatím tu nejsou žádné filmy ani seriály.</p>`;
   const missing = meta.items.filter((e) => e.status === 0 && e.checked).length;

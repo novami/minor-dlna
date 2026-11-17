@@ -1,4 +1,4 @@
-// Package metadata matches movies and shows to Wikidata (and optionally TMDb) and caches their posters.
+// Package metadata matches movies and shows to Wikidata and caches their posters.
 package metadata
 
 import (
@@ -42,7 +42,6 @@ type Service struct {
 	st      *store.Store
 	dir     string
 	c       client
-	token   string
 	enabled bool
 	// OnChange is called after metadata changed, so TVs reload the listing.
 	OnChange func()
@@ -53,11 +52,10 @@ type Service struct {
 
 func New(st *store.Store, dir string, cfg config.Metadata) *Service {
 	return &Service{st: st, dir: dir, c: client{http: &http.Client{Timeout: 20 * time.Second}},
-		token: strings.TrimSpace(cfg.TMDbToken), enabled: cfg.On(), kick: make(chan struct{}, 1)}
+		enabled: cfg.On(), kick: make(chan struct{}, 1)}
 }
 
 func (s *Service) Enabled() bool { return s.enabled }
-func (s *Service) HasTMDb() bool { return s.token != "" }
 
 // Kick requests a pass, e.g. after a library scan.
 func (s *Service) Kick() {
@@ -198,7 +196,7 @@ func (s *Service) lookup(ctx context.Context, r row) error {
 	switch {
 	case r.status == StatusManual && r.wikidata != "":
 		d, err = s.c.details(ctx, r.kind, r.wikidata)
-	case r.status == StatusManual: // TMDb-only manual match: keep it
+	case r.status == StatusManual: // manual match without Wikidata (older TMDb-only): keep it
 		return s.touch(ctx, r.id)
 	default:
 		d, err = s.match(ctx, r.kind, title, year)
@@ -227,14 +225,6 @@ func (s *Service) match(ctx context.Context, k Kind, title string, year int) (De
 			return s.c.details(ctx, k, best.ID)
 		}
 	}
-	if s.token != "" {
-		id, err := s.c.tmdbSearch(ctx, s.token, k, title, year)
-		if err != nil {
-			slog.Warn("tmdb search", "err", err)
-		} else if id != "" {
-			return Details{TMDb: id}, nil
-		}
-	}
 	return Details{}, errNotFound
 }
 
@@ -253,11 +243,6 @@ func (s *Service) touch(ctx context.Context, id int64) error {
 }
 
 func (s *Service) save(ctx context.Context, id int64, status int, d Details) error {
-	if s.token != "" && d.TMDb != "" {
-		if err := s.c.fillTMDb(ctx, s.token, kindOf(ctx, s, id), &d); err != nil {
-			slog.Warn("tmdb details", "id", d.TMDb, "err", err)
-		}
-	}
 	poster := 0
 	if d.PosterURL != "" {
 		if err := s.fetchPoster(ctx, id, d.PosterURL); err != nil {

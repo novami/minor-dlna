@@ -16,7 +16,7 @@ Mediální server v Go pro sdílení videí, fotek a hudby z Macu do TV (primár
 - Knihovny: Filmy, Seriály, Videa, Fotky, **Hudba**.
 - Index v SQLite, detekce změn podle mtime složek + periodický plný rescan.
 - Metadata ze souborů: ffprobe, EXIF, hudební tagy (ID3/Vorbis/MP4).
-- **Metadata filmů a seriálů** z Wikidat a Wikipedie (bez klíče, výchozí) + volitelně TMDb s vlastním klíčem (plakáty, delší popisy).
+- **Metadata filmů a seriálů** z Wikidat a Wikipedie (bez klíče).
 - Náhledy a odvozená rozlišení fotek, HEIC → JPEG.
 - Direct play / částečné / plné transkódování přes ffmpeg s **VideoToolbox** (HW akcelerace Macu).
 - Titulky: externí `.srt` k TV i do webového přehrávače.
@@ -41,11 +41,11 @@ Mediální server v Go pro sdílení videí, fotek a hudby z Macu do TV (primár
        ◄─HTTP─┤ stream     direct (Range) | transcode (MPEG-TS) | HLS        │
  Prohlížeč ◄──┤ web        UI + REST API (embed.FS)                          │
               │ library    scanner, watcher, parser názvů, tagy            │
-              │ metadata   Wikidata/TMDb, cache plakátů                    │
+              │ metadata   Wikidata, cache plakátů                         │
               │ store      SQLite (modernc.org/sqlite, bez cgo)            │
               │ profiles   schopnosti klientů (LG webOS 22+, generic)      │
               └──────────────────────────────────────────────────────────────┘
-                       │ ffmpeg / ffprobe (Homebrew), Wikidata/Wikipedie, TMDb (HTTPS)
+                       │ ffmpeg / ffprobe (Homebrew), Wikidata/Wikipedie (HTTPS)
 ```
 
 ### Struktura projektu
@@ -61,7 +61,7 @@ internal/didl/               DIDL-Lite (pro Browse i SetAVTransportURI)
 internal/dlna/               protocolInfo, DLNA.ORG_* příznaky, hlavičky
 internal/library/            scanner, watcher, klasifikace, parser názvů
 internal/media/              ffprobe, EXIF, hudební tagy, náhledy, HEIC
-internal/metadata/           Wikidata/Wikipedie, volitelně TMDb, párování, cache plakátů
+internal/metadata/           Wikidata/Wikipedie, párování, cache plakátů
 internal/transcode/          profily klientů, rozhodování, ffmpeg sessions, HLS segmenty
 internal/playstate/          pozice, zhlédnuto, pokračovat
 internal/store/              schéma, migrace, dotazy
@@ -163,11 +163,10 @@ Správa: jeden ffmpeg proces na stream, ukončení při odpojení (context cance
 
 **Metadata filmů a seriálů**
 - Zdroj bez klíče: Wikidata (CC0) – vyhledání `wbsearchentities` (cs, toleruje chybějící diakritiku), filtr na film/seriál, shoda roku; z entity český a originální název, rok, žánry, režie, obsazení (top 10), délka, ID na TMDb. Popis z české Wikipedie (fallback anglická), plakát = obrázek článku, jen pokud je na výšku.
-- Volitelně TMDb (uživatelův Read Access Token, zdarma pro nekomerční použití): podle TMDb ID z Wikidat, jinak `search/movie`/`search/tv`; doplní plakát `w342`, český popis a hodnocení.
 - Párování podle dvojice (název ze souboru, rok) / názvu seriálu – nezávisí na ID položek, přežije přeindexování. Nejistá shoda = „nespárováno“, ruční oprava v Nastavení (vyhledání + výběr, nebo „bez metadat“).
 - Spárovaný film se v TV i webu zobrazí s českým názvem a řadí se podle něj; nespárovaný podle souboru.
 - Běh na pozadí po skenu, sekvenčně (šetrné k API), obnova po 30 dnech, nespárované znovu po 7 dnech. Plakáty v lokální cache (tn 160 px pro DLNA, sm pro web).
-- Vypnutelné v Nastavení (posílá názvy filmů na Wikidata/TMDb). Uvedení zdrojů (Wikidata, Wikipedie CC BY-SA, TMDb) v Nastavení.
+- Vypnutelné v Nastavení (posílá názvy filmů na Wikidata). Uvedení zdrojů (Wikidata, Wikipedie CC BY-SA) v Nastavení.
 
 **Hudba** – tagy přes `dhowden/tag` (ID3v2, FLAC, MP4, OGG), chybějící údaje ze struktury `Interpret/Album/01 Skladba.ext`; obal z tagu nebo `cover`/`folder`/`front.jpg`. Pohledy: Interpreti → Alba → Skladby, Alba, Žánry → Alba, Složky. Formáty pro LG direct: MP3, AAC, FLAC, WAV; ALAC/Opus/APE → FLAC (fáze 4).
 
@@ -186,7 +185,7 @@ Správa: jeden ffmpeg proces na stream, ukončení při odpojení (context cance
 
 - `http://<mac>.local:8200/` – statické HTML/JS v `embed.FS`, bez Node buildu a bez hls.js (HLS jen pro Safari, který ho má nativně).
 - **Uživatelská část:** Domů (Pokračovat, Naposledy přidané), knihovny s plakáty, detail (popis, obsazení, stopy, titulky), tlačítka *Přehrát zde* / *Přehrát na TV* (výběr TV), ovladač TV (pauza, seek, hlasitost), fotky jako mřížka + prohlížeč, hudba s přehrávačem a frontou.
-- **Admin část:** knihovny (složky, typ, rescan), metadata (zapnutí, TMDb klíč, nespárované položky, ruční párování), zařízení (TV, profily, WoL), aktivní streamy, nastavení, logy.
+- **Admin část:** knihovny (složky, typ, rescan), metadata (zapnutí, nespárované položky, ruční párování), zařízení (TV, profily, WoL), aktivní streamy, nastavení, logy.
 - Ochrana: jedno heslo (bcrypt) + session cookie; DLNA endpointy bez hesla (protokol to neumí), volitelný allowlist podsítí.
 
 ## 9. Konfigurace a provoz na macOS
@@ -203,7 +202,6 @@ libraries:
   - { name: Hudba,   type: music,  paths: ["~/Music/FLAC"] }
 metadata:
   enabled: true                # Wikidata/Wikipedie
-  tmdb_token: ""               # prázdné = bez TMDb
 transcode:
   ffmpeg: ""                   # prázdné = PATH, /opt/homebrew/bin
   hwaccel: videotoolbox        # none | videotoolbox
@@ -254,7 +252,7 @@ updates:
 | Konfigurace | `gopkg.in/yaml.v3` |
 | Web (frontend) | htmx, hls.js – vendorované soubory v `embed.FS` |
 
-Klienti Wikidat/TMDb, DLNA vrstva i updater vlastní (několik endpointů, bez SDK).
+Klient Wikidat, DLNA vrstva i updater vlastní (několik endpointů, bez SDK).
 
 ## 11. Fáze implementace
 
@@ -263,7 +261,7 @@ Klienti Wikidat/TMDb, DLNA vrstva i updater vlastní (několik endpointů, bez S
 3. **Fotky + hudba:** EXIF, odvozeniny, HEIC, náhledy videí; tagy, pohledy Interpret/Album.
 4. **Transkódování:** profily, rozhodování, VideoToolbox, MPEG-TS, TimeSeekRange, SRT.
 5. **Web UI základ + aktualizace:** přihlášení, knihovny s náhledy, admin, launchd install, release pipeline, updater (auto i ruční).
-6. **Metadata (Wikidata + volitelně TMDb):** párování, cache plakátů, ruční oprava, plakáty a české názvy v TV i webu.
+6. **Metadata (Wikidata):** párování, cache plakátů, ruční oprava, plakáty a české názvy v TV i webu.
 7. **Přehrát na TV:** discovery rendererů, AVTransport, ovladač, play state, další epizoda, WoL.
 8. **Webový přehrávač:** direct MP4 / HLS, pozice, titulky, hudební přehrávač.
 9. **Další značky TV:** profily Samsung, Sony, Panasonic, Hisense, Roku, Android TV, obecná TV; detekce z UA i popisu rendereru, ruční volba profilu, Samsung záložky.
@@ -286,7 +284,7 @@ Každá fáze končí funkčním stavem testovaným na LG TV.
 - **Profily jiných značek než LG nejsou ověřené na skutečné TV** – formáty podle specifikací, ale firmware a přehrávače (hlavně Android TV aplikace) se liší; řešení je ruční volba profilu. Ruční volba je vázaná na IP – při změně adresy z DHCP se ztratí (doporučit pevnou IP v routeru).
 - **LG AVTransport quirky:** některé firmwary odmítají `SetAVTransportURI` bez přesného DIDL `protocolInfo`, nebo nehlásí `LastChange` – proto polling.
 - **Pozice u přehrávání spuštěného z TV** je jen odhad.
-- **Metadata:** posílají názvy filmů na Wikidata/TMDb (vypnutelné), chybné párování u obecných názvů, plakáty z Wikipedie jen u části filmů, závislost na dostupnosti API.
+- **Metadata:** posílají názvy filmů na Wikidata (vypnutelné), chybné párování u obecných názvů, plakáty z Wikipedie jen u části filmů, závislost na dostupnosti API.
 - **HLS v prohlížeči** u HEVC/Dolby Vision: Chrome/Firefox HEVC neumí spolehlivě → transkód do H.264 (zátěž CPU/GPU).
 - **Wi-Fi propustnost** u 4K remuxů – řešení jen kabel nebo nižší bitrate.
 - **Samoaktualizace a macOS:** výměna binárky mění její hash → systém může znovu žádat povolení Místní síť / firewallu. Vlastní certifikát drží identitu napříč verzemi; Gatekeeper ho ale nezná (první spuštění stažené aplikace přes pravé tlačítko → Otevřít), to vyřeší až Developer ID + notarizace (placený účet Apple). Ztráta certifikátu = ještě jednou nové povolení Místní síť. Ztráta podpisového klíče Ed25519 = nutnost ruční reinstalace.

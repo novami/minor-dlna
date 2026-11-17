@@ -188,7 +188,6 @@ type stateJSON struct {
 	MenuBar      bool             `json:"menubar"`
 	InApp        bool             `json:"in_app"`
 	Metadata     bool             `json:"metadata"`
-	TMDb         bool             `json:"tmdb"`
 	HWAccel      string           `json:"hwaccel"`
 	Suggestions  []libraryJSON    `json:"suggestions"`
 	Home         string           `json:"home"`
@@ -210,7 +209,7 @@ func (s *Server) state(w http.ResponseWriter, r *http.Request) {
 		FFmpeg: s.FFmpeg, Scanning: s.Scanner.Scanning(), Progress: s.Scanner.Progress(), Addresses: lanAddresses(s.Cfg.Port),
 		Libraries: libs, IsLocal: isLocal(r), Remote: s.remoteEnabled(), DTS: s.Cfg.Transcode.DTSEnabled(), AutoUpdate: s.Cfg.Updates.AutoEnabled(), HWAccel: s.Cfg.Transcode.HWAccel,
 		Suggestions: suggestions(), Home: homeDir(), MenuBar: s.Cfg.MenuBarEnabled(), InApp: inApp(),
-		Metadata: s.Cfg.Metadata.On(), TMDb: s.Cfg.Metadata.TMDbToken != "",
+		Metadata: s.Cfg.Metadata.On(),
 	})
 }
 
@@ -245,15 +244,14 @@ type configRequest struct {
 		Type  config.LibraryType `json:"type"`
 		Paths []string           `json:"paths"`
 	} `json:"libraries"`
-	DTS        bool    `json:"dts"`
-	HWAccel    string  `json:"hwaccel"`
-	Autostart  bool    `json:"autostart"`
-	AutoUpdate *bool   `json:"auto_update"`
-	Remote     *bool   `json:"remote"`
-	MenuBar    *bool   `json:"menubar"`
-	Metadata   *bool   `json:"metadata"`
-	TMDbToken  *string `json:"tmdb_token"` // nil = keep, "" = remove
-	Password   string  `json:"password"`   // new password for remote access, empty = keep
+	DTS        bool   `json:"dts"`
+	HWAccel    string `json:"hwaccel"`
+	Autostart  bool   `json:"autostart"`
+	AutoUpdate *bool  `json:"auto_update"`
+	Remote     *bool  `json:"remote"`
+	MenuBar    *bool  `json:"menubar"`
+	Metadata   *bool  `json:"metadata"`
+	Password   string `json:"password"` // new password for remote access, empty = keep
 }
 
 func (s *Server) saveConfig(w http.ResponseWriter, r *http.Request) {
@@ -312,9 +310,6 @@ func (s *Server) saveConfig(w http.ResponseWriter, r *http.Request) {
 	if req.Metadata != nil {
 		on := *req.Metadata
 		next.Metadata.Enabled = &on
-	}
-	if req.TMDbToken != nil {
-		next.Metadata.TMDbToken = strings.TrimSpace(*req.TMDbToken)
 	}
 	if req.AutoUpdate != nil {
 		auto := *req.AutoUpdate

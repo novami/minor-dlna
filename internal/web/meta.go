@@ -14,7 +14,7 @@ func (s *Server) metaList(w http.ResponseWriter, r *http.Request) {
 		writeError(w, "Seznam se nepodařilo načíst.")
 		return
 	}
-	writeJSON(w, map[string]any{"enabled": s.Meta.Enabled(), "tmdb": s.Meta.HasTMDb(), "items": entries})
+	writeJSON(w, map[string]any{"enabled": s.Meta.Enabled(), "items": entries})
 }
 
 func (s *Server) metaSearch(w http.ResponseWriter, r *http.Request) {
