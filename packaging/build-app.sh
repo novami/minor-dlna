@@ -54,4 +54,7 @@ else
 	echo "warning: no signing certificate, signing ad-hoc (macOS asks for permissions after every build)" >&2
 	codesign --force --sign - --identifier cz.minordlna "$APP"
 fi
+# The bundle is recreated at the same path, so Finder keeps its cached (generic) icon until told otherwise.
+touch "$APP"
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP" || true
 echo "Built $APP ($VERSION)"
