@@ -58,8 +58,11 @@ func (s *Server) registerPlayer(mux *http.ServeMux) {
 		}
 		// iOS Safari drops an HDR variant silently, even on an HDR display (iPhone, iOS 18.7), so it gets
 		// tone-mapped SDR; H.264 from HDR would keep PQ colours and look washed out.
-		hdr := req.HLS && plan.Video != "" && s.Transcode.HDR(r.Context(), o.Path)
-		if hdr && (req.SDR || plan.Video == "h264") {
+		var transfer string
+		if req.HLS && plan.Video != "" {
+			transfer = s.Transcode.Transfer(r.Context(), o.Path)
+		}
+		if transfer != "" && (req.SDR || plan.Video == "h264") {
 			plan.Video = "sdr"
 		}
 		start := max(req.T, 0)
@@ -75,7 +78,7 @@ func (s *Server) registerPlayer(mux *http.ServeMux) {
 			writeJSON(w, map[string]any{"url": url, "start": start})
 			return
 		}
-		token, err := s.HLS.Start(r.Context(), o, plan, start)
+		token, err := s.HLS.Start(r.Context(), o, plan, start, transfer)
 		if err != nil {
 			if err == transcode.ErrBusy {
 				writeError(w, "Server právě převádí jiná videa, zkuste to za chvíli.")

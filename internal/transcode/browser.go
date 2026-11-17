@@ -100,7 +100,9 @@ func NewHLS(svc *Service, dir string) *HLS {
 }
 
 // Start launches ffmpeg for item o from start seconds and returns the session token.
-func (h *HLS) Start(ctx context.Context, o library.Object, p Plan, start float64) (string, error) {
+// transfer is the HDR transfer of o from Transfer; copied video gets it written into the stream,
+// as a file tagged only in its bitstream would otherwise reach the player marked SDR.
+func (h *HLS) Start(ctx context.Context, o library.Object, p Plan, start float64, transfer string) (string, error) {
 	release, ok := h.svc.acquire(ctx, o.Title)
 	if !ok {
 		return "", ErrBusy
@@ -114,6 +116,9 @@ func (h *HLS) Start(ctx context.Context, o library.Object, p Plan, start float64
 		return "", err
 	}
 	args := browserMux(baseArgs(p, o, start, h.svc.hwaccel, true), p, o.VideoCodec == "hevc")
+	if p.Video == "copy" && transfer != "" {
+		args = append(args, "-color_primaries", "bt2020", "-color_trc", transfer, "-colorspace", "bt2020nc")
+	}
 	args = append(args, "-f", "hls", "-hls_time", "4", "-hls_list_size", "0", "-hls_playlist_type", "event",
 		"-hls_segment_type", "fmp4", "-hls_flags", "independent_segments+temp_file",
 		"-hls_fmp4_init_filename", "init.mp4", "-hls_segment_filename", filepath.Join(dir, "s%05d.m4s"),
@@ -262,18 +267,22 @@ func startAtBeginning(b []byte) []byte {
 // ErrBusy reports that all transcoding slots are in use.
 var ErrBusy = errors.New("too many transcoding sessions")
 
-// HDR reports that the video of path uses a PQ or HLG transfer.
-func (s *Service) HDR(ctx context.Context, path string) bool {
+// Transfer returns "smpte2084" (PQ) or "arib-std-b67" (HLG) for HDR video in path, otherwise "".
+// It reads the first frame, as files tagged only in the bitstream show no transfer on the stream.
+func (s *Service) Transfer(ctx context.Context, path string) string {
 	if s.ffmpeg == "" {
-		return false
+		return ""
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	probe := filepath.Join(filepath.Dir(s.ffmpeg), "ffprobe")
-	out, _ := exec.CommandContext(ctx, probe, "-v", "error", "-select_streams", "v:0",
-		"-show_entries", "stream=color_transfer", "-of", "csv=p=0", path).Output()
-	t := strings.TrimSpace(string(out))
-	return t == "smpte2084" || t == "arib-std-b67"
+	out, _ := exec.CommandContext(ctx, probe, "-v", "error", "-select_streams", "v:0", "-read_intervals", "%+#1",
+		"-show_entries", "frame=color_transfer", "-of", "csv=p=0", path).Output()
+	switch t := strings.Trim(strings.TrimSpace(string(out)), ","); t {
+	case "smpte2084", "arib-std-b67":
+		return t
+	}
+	return ""
 }
 
 // Keyframe returns the last video keyframe at or before t seconds. A copied video stream can only start
