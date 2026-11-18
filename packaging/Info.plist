@@ -6,6 +6,11 @@
 	<string>cz.minordlna</string>
 	<key>CFBundleName</key>
 	<string>MinorDLNA</string>
+	<!-- System panels (folder picker) follow the bundle's language, not the user's. -->
+	<key>CFBundleDevelopmentRegion</key>
+	<string>cs</string>
+	<key>CFBundleLocalizations</key>
+	<array><string>cs</string></array>
 	<key>CFBundleDisplayName</key>
 	<string>MinorDLNA</string>
 	<key>CFBundleExecutable</key>

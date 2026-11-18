@@ -1,16 +1,13 @@
-// Package macos wraps the few system integrations the app needs, using built-in command-line tools (no cgo).
+// Package macos wraps the few system integrations the app needs, mostly through built-in command-line tools.
 package macos
 
 import (
-	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 const agentLabel = "cz.minordlna"
@@ -20,26 +17,6 @@ var ErrCancelled = errors.New("cancelled")
 
 // OpenURL opens a URL in the default browser.
 func OpenURL(url string) error { return exec.Command("/usr/bin/open", url).Run() }
-
-// PickFolder shows the native folder picker on the Mac's screen and returns the chosen path.
-func PickFolder(ctx context.Context, prompt string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-	defer cancel()
-	// The prompt is passed as an argument, never interpolated into the script.
-	script := `on run argv
-	activate
-	return POSIX path of (choose folder with prompt (item 1 of argv))
-end run`
-	out, err := exec.CommandContext(ctx, "/usr/bin/osascript", "-e", script, prompt).Output()
-	if err != nil {
-		var ee *exec.ExitError
-		if errors.As(err, &ee) && bytes.Contains(ee.Stderr, []byte("-128")) {
-			return "", ErrCancelled
-		}
-		return "", err
-	}
-	return strings.TrimSuffix(strings.TrimSpace(string(out)), "/"), nil
-}
 
 // ComputerName returns the user-visible name of the Mac.
 func ComputerName() string {
