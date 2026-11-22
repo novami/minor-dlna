@@ -17,7 +17,7 @@ Nativní SwiftUI pro Mac, webové UI pro přehrávač a vzdálený přístup. St
 | Logování | os.Logger (subsystem cz.minordlna.app) | Console.app / `log stream` |
 | Aktualizace | vlastní kontrola GitHub Releases, ověření podpisu, výměna bundlu | jako dnes, bez Sparkle |
 
-Range a TimeSeekRange s hlavičkami DLNA.ORG_* napíšeme sami. ffmpeg a ffprobe zůstávají z Homebrew.
+Range a TimeSeekRange s hlavičkami DLNA.ORG_* napíšeme sami. Přímo použité balíčky: Hummingbird, SwiftNIO, swift-http-types, swift-log, swift-service-lifecycle (poslední tři jsou závislosti Hummingbirdu). ffmpeg a ffprobe zůstávají z Homebrew.
 
 ## Struktura
 
@@ -36,8 +36,8 @@ macos/
 | # | Obsah | Hotovo, když |
 |---|---|---|
 | S1 | Kostra: SwiftPM, MenuBarExtra, Settings, logování, build-app.sh a podpis, CI | App se spustí z lišty a uloží nastavení |
-| S2 | HTTP + SSDP + device.xml + CDS Browse nad složkami + direct play s Range | LG server vidí a přehraje MKV/MP4 |
-| S3 | Store, Library (scanner, FSEvents, parser názvů), Media (ffprobe, EXIF, tagy, náhledy, HEIC), GENA | Filmy/Seriály/Hudba/Fotky na TV, 10k položek plynule |
+| S2 | HTTP + SSDP + device.xml + CDS Browse nad složkami + direct play s Range + GENA | LG server vidí a přehraje MKV/MP4 |
+| S3 | Store, Library (scanner, FSEvents, parser názvů), Media (ffprobe, EXIF, tagy, náhledy, HEIC) | Filmy/Seriály/Hudba/Fotky na TV, 10k položek plynule |
 | S4 | Transcode: profily, rozhodování, VideoToolbox, MPEG-TS, TimeSeekRange, titulky | Převod, posun a titulky na LG |
 | S5 | Přehled + Nastavení ve SwiftUI, web API + vzdálený přístup s přihlášením, updater | Nastavení bez prohlížeče, update z vydání na vydání |
 | S6 | Metadata (Wikidata/Wikipedie, plakáty, ruční oprava) | Plakáty a české názvy na TV |

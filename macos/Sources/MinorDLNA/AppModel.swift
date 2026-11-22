@@ -6,8 +6,18 @@ import ServiceManagement
 @MainActor @Observable
 final class AppModel {
 	var settings: Settings {
-		didSet { if settings != oldValue { save() } }
+		didSet {
+			guard settings != oldValue else { return }
+			save()
+			if serverConfig(settings) != serverConfig(oldValue) { scheduleRestart() }
+		}
 	}
+	private(set) var serverState: ServerState = .stopped
+	@ObservationIgnored private let server = MediaServer()
+	@ObservationIgnored private var restartTask: Task<Void, Never>?
+
+	static let version = Bundle.main.object(forInfoDictionaryKey: "MinorDLNABuild") as? String ?? "dev"
+
 	/// Last error shown in the settings window.
 	var error: String?
 
@@ -25,6 +35,38 @@ final class AppModel {
 			self.error = "Nastavení nešlo načíst, začíná se znovu. Původní soubor: \(bad.path)"
 		}
 		save() // persists the generated UUID and name on first launch
+		Task { [weak self, states = server.states] in
+			for await state in states { self?.serverState = state }
+		}
+		scheduleRestart(after: .zero)
+	}
+
+	private func serverConfig(_ s: Settings) -> ServerConfig {
+		ServerConfig(settings: s, version: Self.version, iconURL: Bundle.main.url(forResource: "AppIcon", withExtension: "icns"))
+	}
+
+	/// Debounced, so typing the server name restarts the server once. Each restart waits for the previous one,
+	/// so two servers never compete for the port.
+	private func scheduleRestart(after delay: Duration = .milliseconds(800)) {
+		let previous = restartTask
+		previous?.cancel()
+		let config = serverConfig(settings)
+		restartTask = Task { [server] in
+			await previous?.value
+			try? await Task.sleep(for: delay)
+			guard !Task.isCancelled else { return }
+			await server.start(config)
+		}
+	}
+
+	var statusText: String {
+		switch serverState {
+		case .stopped: "Server nespuštěn"
+		case .starting: "Server se spouští…"
+		case let .running(port, addresses):
+			addresses.isEmpty ? "Server běží, ale není připojen k síti" : "Server běží na \(addresses.map { "\($0):\(port)" }.joined(separator: ", "))"
+		case let .failed(message): message
+		}
 	}
 
 	private func save() {

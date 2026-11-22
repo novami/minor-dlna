@@ -23,8 +23,8 @@ private struct MenuContent: View {
 	var body: some View {
 		@Bindable var model = model
 		Text(model.settings.name)
-		Text("Server nespuštěn")
-		Text("Verze \(Bundle.main.object(forInfoDictionaryKey: "MinorDLNABuild") as? String ?? "dev")")
+		Text(model.statusText)
+		Text("Verze \(AppModel.version)")
 		Divider()
 		Button("Nastavení…") {
 			// A menu bar app is never active on its own, so the window would open behind others.
