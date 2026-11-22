@@ -15,14 +15,16 @@ public struct ServerConfig: Sendable, Equatable {
 	public var version: String
 	/// Image the device icons are rendered from (the app's .icns).
 	public var iconURL: URL?
+	public var databaseURL: URL
 
-	public init(settings: Settings, version: String, iconURL: URL?) {
+	public init(settings: Settings, version: String, iconURL: URL?, databaseURL: URL = Store.defaultURL) {
 		name = settings.name.trimmingCharacters(in: .whitespaces).isEmpty ? "MinorDLNA" : settings.name
 		uuid = settings.uuid
 		port = settings.port
 		libraries = settings.libraries
 		self.version = version
 		self.iconURL = iconURL
+		self.databaseURL = databaseURL
 	}
 }
 
@@ -40,6 +42,8 @@ public actor MediaServer {
 	private let continuation: AsyncStream<ServerState>.Continuation
 	private var group: ServiceGroup?
 	private var task: Task<Void, Never>?
+	/// Kept open across restarts.
+	private var store: (url: URL, store: Store)?
 
 	public init() { (states, continuation) = AsyncStream.makeStream() }
 
@@ -52,7 +56,18 @@ public actor MediaServer {
 		logger.logLevel = .warning
 		let ssdp = SSDPService(uuid: config.uuid.uuidString.lowercased(), port: config.port, serverHeader: Self.serverHeader(config.version),
 		                       services: [Descriptions.cdsType, Descriptions.cmsType])
-		let routes = Routes(config: config)
+		let store: Store, libraries: [IndexedLibrary]
+		do {
+			store = try openStore(config.databaseURL)
+			let ids = try store.syncLibraries(config.libraries)
+			libraries = config.libraries.compactMap { l in ids[l.id].map { IndexedLibrary(id: $0, library: l) } }
+		} catch {
+			Log.server.error("index unavailable: \(error, privacy: .public)")
+			onState(.failed("Index knihovny nejde otevřít: \(error)"))
+			return
+		}
+		let routes = Routes(config: config, store: store, libraries: libraries)
+		let scanner = LibraryScanner(store: store, libraries: libraries) { _ in Task { await routes.cds.notifyAll() } }
 		let onState = { @Sendable (s: ServerState) in self.onState(s) }
 		let app = Application(
 			router: routes.router(),
@@ -64,7 +79,10 @@ public actor MediaServer {
 			},
 			logger: logger
 		)
-		let group = ServiceGroup(configuration: .init(services: [.init(service: app)], logger: logger))
+		let group = ServiceGroup(configuration: .init(services: [
+			.init(service: app),
+			.init(service: scanner, successTerminationBehavior: .ignore),
+		], logger: logger))
 		self.group = group
 		task = Task {
 			do {
@@ -75,6 +93,13 @@ public actor MediaServer {
 				onState(.failed(Self.describe(error, port: config.port)))
 			}
 		}
+	}
+
+	private func openStore(_ url: URL) throws -> Store {
+		if let store, store.url == url { return store.store }
+		let s = try Store(url: url)
+		store = (url, s)
+		return s
 	}
 
 	public func stop() async {
@@ -130,20 +155,18 @@ extension HTTPField.Name {
 
 struct Routes: Sendable {
 	let config: ServerConfig
-	let catalog: FolderCatalog
-	let updateID: String
+	let catalog: LibraryCatalog
+	let store: Store
 	let cds: Eventer
 	let cms: Eventer
 	let icons: [Int: Data]
 	let files = FileIO()
 
-	init(config: ServerConfig) {
+	init(config: ServerConfig, store: Store, libraries: [IndexedLibrary]) {
 		self.config = config
-		catalog = FolderCatalog(libraries: config.libraries)
-		// The library is read from disk on every Browse, so a new start is the only change clients must notice.
-		let updateID = String(UInt32(Date().timeIntervalSince1970) % UInt32.max)
-		self.updateID = updateID
-		cds = Eventer { [("SystemUpdateID", updateID), ("ContainerUpdateIDs", "")] }
+		self.store = store
+		catalog = LibraryCatalog(db: store.reader, libraries: libraries)
+		cds = Eventer { [("SystemUpdateID", String(store.updateID())), ("ContainerUpdateIDs", "")] }
 		cms = Eventer { [("SourceProtocolInfo", MediaFormat.sourceProtocolInfo), ("SinkProtocolInfo", ""), ("CurrentConnectionIDs", "0")] }
 		icons = config.iconURL.map(Self.renderIcons) ?? [:]
 	}
@@ -208,10 +231,10 @@ struct Routes: Sendable {
 			default: throw .invalidArgs
 			}
 			return ["Result": DIDL.render(objs, baseURL: baseURL), "NumberReturned": String(objs.count),
-			        "TotalMatches": String(total), "UpdateID": updateID]
+			        "TotalMatches": String(total), "UpdateID": String(store.updateID())]
 		case "GetSearchCapabilities": return ["SearchCaps": ""]
 		case "GetSortCapabilities": return ["SortCaps": "dc:title"]
-		case "GetSystemUpdateID": return ["Id": updateID]
+		case "GetSystemUpdateID": return ["Id": String(store.updateID())]
 		default: throw .invalidAction
 		}
 	}
@@ -238,8 +261,7 @@ struct Routes: Sendable {
 	// MARK: Media
 
 	private func media(_ req: Request, _ ctx: DLNAContext) async throws -> Response {
-		let token = (ctx.parameters.get("token") ?? "").prefix { $0 != "." }
-		guard let obj = catalog.media(token: token), let path = obj.path, let format = obj.format else { return Response(status: .notFound) }
+		guard let obj = catalog.media(Substring(ctx.parameters.get("token") ?? "")), let path = obj.path, let format = obj.format else { return Response(status: .notFound) }
 		var h: HTTPFields = [.contentType: format.mime, .acceptRanges: "bytes"]
 		let mode = req.headers[.transferMode]
 		h[.transferMode] = ["Streaming", "Interactive", "Background"].contains(mode ?? "") ? mode : format.transferMode

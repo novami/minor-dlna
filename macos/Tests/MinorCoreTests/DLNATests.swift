@@ -13,16 +13,6 @@ import Testing
 	#expect(ByteRange.parse("bytes=9-3", size: 1000) == nil)
 }
 
-@Test func tokensStayInsideLibraries() throws {
-	let lib = Library(name: "Filmy", type: .movies, paths: ["/Volumes/Data/Filmy"])
-	let cat = FolderCatalog(libraries: [lib])
-	let token = FolderCatalog.token(for: "/Volumes/Data/Filmy/a.mkv")
-	#expect(FolderCatalog.path(fromToken: Substring(token)) == "/Volumes/Data/Filmy/a.mkv")
-	// ".." would resolve outside the root, and a sibling with the same prefix is not inside it.
-	#expect(FolderCatalog.path(fromToken: Substring(FolderCatalog.token(for: "/Volumes/Data/Filmy/../x.mkv"))) == nil)
-	#expect(cat.media(token: Substring(FolderCatalog.token(for: "/Volumes/Data/Filmy2/a.mkv"))) == nil)
-}
-
 @Test func soapParse() {
 	let body = #"""
 	<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body>
@@ -39,15 +29,19 @@ import Testing
 	defer { try? FileManager.default.removeItem(at: dir) }
 	try Data((0..<100).map { UInt8($0) }).write(to: dir.appending(path: "Film & Co.mkv"))
 	try Data().write(to: dir.appending(path: "notes.txt"))
+	try Data([1]).write(to: dir.appending(path: "Sub/x.mp4"))
 
-	let lib = Library(name: "Filmy", type: .movies, paths: [dir.path(percentEncoded: false).replacingOccurrences(of: #"/$"#, with: "", options: .regularExpression)])
+	let lib = Library(name: "Filmy", type: .videos, paths: [dir.path(percentEncoded: false).replacingOccurrences(of: #"/$"#, with: "", options: .regularExpression)])
 	var settings = Settings(name: "Test")
 	settings.libraries = [lib]
-	let routes = Routes(config: ServerConfig(settings: settings, version: "test", iconURL: nil))
+	let store = try Store(url: dir.appending(path: "index.sqlite"))
+	let libs = try store.syncLibraries([lib]).map { IndexedLibrary(id: $0.value, library: lib) }
+	LibraryScanner(store: store, libraries: libs) { _ in }.scanAll(force: true)
+	let routes = Routes(config: ServerConfig(settings: settings, version: "test", iconURL: nil), store: store, libraries: libs)
 	let app = Application(router: routes.router())
 
 	try await app.test(.live) { client in
-		let libID = "L\(lib.id.uuidString)"
+		let libID = "L\(libs[0].id)/folders"
 		let browse = #"<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:Browse xmlns:u="urn:schemas-upnp-org:service:ContentDirectory:1"><ObjectID>\#(libID)</ObjectID><BrowseFlag>BrowseDirectChildren</BrowseFlag><StartingIndex>0</StartingIndex><RequestedCount>10</RequestedCount></u:Browse></s:Body></s:Envelope>"#
 		let didl = try await client.execute(uri: "/cds/control", method: .post, body: ByteBuffer(string: browse)) { res in
 			#expect(res.status == .ok)
@@ -58,8 +52,8 @@ import Testing
 		#expect(!didl.contains("notes"))
 		#expect(didl.contains("&lt;TotalMatches&gt;") == false && didl.contains("<TotalMatches>2</TotalMatches>"))
 
-		let token = FolderCatalog.token(for: lib.paths[0] + "/Film & Co.mkv")
-		try await client.execute(uri: "/media/\(token).mkv", method: .get,
+		let item = try #require(didl.firstMatch(of: /\/media\/(\d+)\.mkv/)?.1)
+		try await client.execute(uri: "/media/\(item).mkv", method: .get,
 		                         headers: [.range: "bytes=10-19", .getContentFeatures: "1"]) { res in
 			#expect(res.status == .partialContent)
 			#expect(res.headers[.contentRange] == "bytes 10-19/100")
@@ -67,11 +61,6 @@ import Testing
 			#expect(res.headers[.contentFeatures]?.hasPrefix("DLNA.ORG_OP=01") == true)
 		}
 	}
-}
-
-@Test func privateTmpPathsResolve() {
-	let p = "/private/tmp/media/a.mkv"
-	#expect(FolderCatalog.path(fromToken: Substring(FolderCatalog.token(for: p))) == p)
 }
 
 /// A restart must release the port before binding again; a second server on a busy port reports it.

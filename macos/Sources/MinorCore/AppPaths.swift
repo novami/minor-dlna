@@ -15,5 +15,6 @@ public enum Log {
 	public static let app = Logger(subsystem: AppPaths.bundleID, category: "app")
 	public static let settings = Logger(subsystem: AppPaths.bundleID, category: "settings")
 	public static let server = Logger(subsystem: AppPaths.bundleID, category: "server")
+	static let library = Logger(subsystem: AppPaths.bundleID, category: "library")
 	static let ssdp = Logger(subsystem: AppPaths.bundleID, category: "ssdp")
 }
