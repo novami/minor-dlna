@@ -33,12 +33,15 @@ struct Described: Sendable {
 }
 
 /// Keeps the index in sync with the library folders: a full scan on start and every 6 hours,
-/// and every minute a cheap check of folder modification times.
+/// a rescan of a library a few seconds after FSEvents reports a change in it,
+/// and every minute a cheap check of folder modification times (network volumes, missed events).
 final class LibraryScanner: Service, Sendable {
 	static let checkInterval = Duration.seconds(60)
 	static let fullInterval: TimeInterval = 6 * 3600
 	/// Files modified more recently may still be copying; their library is checked again on the next round.
 	static let settleTime: TimeInterval = 120
+	/// A long copy reports changes all the time; event-driven rescans are at least this far apart.
+	static let minEventGap = Duration.seconds(10)
 
 	let store: Store
 	let libraries: [IndexedLibrary]
@@ -48,6 +51,8 @@ final class LibraryScanner: Service, Sendable {
 	private struct State {
 		var dirs: [Int64: [String: Date]] = [:] // library → folder → mtime at last scan
 		var pending: Set<Int64> = []
+		var changed = false // FSEvents reported a change since the last round
+		var lastRound = ContinuousClock.now
 	}
 	private let state = Mutex(State())
 
@@ -60,13 +65,18 @@ final class LibraryScanner: Service, Sendable {
 	}
 
 	func run() async {
+		let roots = libraries.flatMap { lib in lib.paths.map { (root: FolderWatcher.realPath($0), id: lib.id) } }
+		let watcher = FolderWatcher(paths: roots.map(\.root), latency: 3) { [weak self] paths in
+			self?.markChanged(FolderWatcher.libraries(for: paths, roots: roots))
+		}
+		defer { withExtendedLifetime(watcher) {} }
 		await cancelWhenGracefulShutdown {
 			self.scanAll(force: true)
 			var lastFull = Date()
 			while !Task.isCancelled {
 				// Probing a large import takes minutes; it yields to the folder check every interval.
 				if await !self.probePending(for: Self.checkInterval) {
-					do { try await Task.sleep(for: Self.checkInterval) } catch { return }
+					do { try await self.waitForChange(upTo: Self.checkInterval) } catch { return }
 				}
 				let full = Date().timeIntervalSince(lastFull) > Self.fullInterval
 				if full { lastFull = Date() }
@@ -75,8 +85,31 @@ final class LibraryScanner: Service, Sendable {
 		}
 	}
 
+	func markChanged(_ ids: Set<Int64>) {
+		guard !ids.isEmpty else { return }
+		state.withLock {
+			$0.pending.formUnion(ids)
+			$0.changed = true
+		}
+	}
+
+	private var changeDue: Bool {
+		state.withLock { $0.changed && ContinuousClock.now - $0.lastRound >= Self.minEventGap }
+	}
+
+	private func waitForChange(upTo timeout: Duration) async throws {
+		let deadline = ContinuousClock.now + timeout
+		while ContinuousClock.now < deadline, !changeDue {
+			try await Task.sleep(for: .seconds(1))
+		}
+	}
+
 	/// Scans libraries that changed (all with force) and bumps SystemUpdateID when the index changed.
 	func scanAll(force: Bool) {
+		state.withLock {
+			$0.changed = false
+			$0.lastRound = .now
+		}
 		var changed = false
 		for lib in libraries where force || needsScan(lib) {
 			guard !Task.isCancelled else { return }
@@ -308,7 +341,7 @@ final class LibraryScanner: Service, Sendable {
 	}
 
 	/// Fills duration, codecs and music tags of new or changed items, two files at a time.
-	/// Returns true when the time budget ran out with items still pending.
+	/// Returns true when the time budget ran out (or a folder change is due) with items still pending.
 	func probePending(for budget: Duration) async -> Bool {
 		guard prober.available else { return false }
 		let deadline = ContinuousClock.now + budget
@@ -323,7 +356,7 @@ final class LibraryScanner: Service, Sendable {
 				}
 			}
 		}
-		while !Task.isCancelled, ContinuousClock.now < deadline {
+		while !Task.isCancelled, ContinuousClock.now < deadline, !changeDue {
 			let jobs: [ProbeJob]
 			do {
 				jobs = try store.reader.query("""

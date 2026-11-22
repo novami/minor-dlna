@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import Synchronization
 @testable import MinorCore
 
 @Test func movieNames() {
@@ -52,4 +53,25 @@ import Testing
 	#expect(try cat.children("L\(libs[0].id)/shows", start: 0, count: 0).objects.map(\.title) == ["Show"])
 	#expect(try cat.children(seasons[0].id, start: 0, count: 0).objects.map(\.id) == eps.map(\.id))
 	#expect(store.updateID() == 2)
+}
+
+/// FSEvents reports a new file in a library; hidden files do not count.
+@Test func folderWatcher() async throws {
+	let dir = FileManager.default.temporaryDirectory.appending(path: "minordlna-\(UUID())")
+	try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+	defer { try? FileManager.default.removeItem(at: dir) }
+	let root = FolderWatcher.realPath(dir.path(percentEncoded: false))
+	let roots = [(root: root, id: Int64(7)), (root: root + "-jiný", id: Int64(8))]
+	#expect(FolderWatcher.libraries(for: [root + "/.DS_Store", root + "/Film/._a.mkv"], roots: roots).isEmpty)
+
+	let seen = Mutex<Set<Int64>>([])
+	let watcher = FolderWatcher(paths: [root], latency: 0.1) { paths in
+		seen.withLock { $0.formUnion(FolderWatcher.libraries(for: paths, roots: roots)) }
+	}
+	#expect(watcher != nil)
+	try await Task.sleep(for: .milliseconds(300))
+	try Data([0]).write(to: dir.appending(path: "Film.mkv"))
+	for _ in 0..<50 where seen.withLock({ $0.isEmpty }) { try await Task.sleep(for: .milliseconds(100)) }
+	#expect(seen.withLock { $0 } == [7])
+	withExtendedLifetime(watcher) {}
 }
