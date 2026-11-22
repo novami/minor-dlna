@@ -12,10 +12,11 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - run: swift test --package-path macos
+      # Checksums are still signed by the Go tool until the updater moves to Swift (S5).
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - run: go vet ./... && go test ./...
 
       - name: Build app
         env:

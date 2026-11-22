@@ -1,19 +1,19 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-LDFLAGS := -s -w -X github.com/novami/minor-dlna/internal/version.Version=$(VERSION)
 
-.PHONY: build test run app install-app
+.PHONY: build test app run install-app
 
 build:
-	go build -ldflags "$(LDFLAGS)" -o bin/minordlna ./cmd/minordlna
+	swift build --package-path macos
 
 test:
-	go vet ./... && go test ./...
-
-run: build
-	./bin/minordlna -debug
+	swift test --package-path macos
 
 app:
 	VERSION=$(VERSION) packaging/build-app.sh
+
+# SwiftUI needs the bundle (Info.plist, LSUIElement), so run the built app rather than the bare binary.
+run: app
+	open dist/MinorDLNA.app
 
 # Copies the app to ~/Applications (Finder, Spotlight, Launchpad).
 install-app: app

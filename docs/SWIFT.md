@@ -14,6 +14,7 @@ Nativní SwiftUI pro Mac, webové UI pro přehrávač a vzdálený přístup. St
 | Nastavení | Codable struktura → `settings.json` v Application Support | čitelné, bez závislosti, SwiftUI se na ně váže přes `@Observable` |
 | Knihovna, stav sledování, cache metadat | SQLite přes systémové `SQLite3` + tenký vlastní obal, nové schéma | rychlé stránkování Browse a FTS hledání bez závislosti |
 | Spouštění při přihlášení | SMAppService | náhrada launchd plistu |
+| Logování | os.Logger (subsystem cz.minordlna.app) | Console.app / `log stream` |
 | Aktualizace | vlastní kontrola GitHub Releases, ověření podpisu, výměna bundlu | jako dnes, bez Sparkle |
 
 Range a TimeSeekRange s hlavičkami DLNA.ORG_* napíšeme sami. ffmpeg a ffprobe zůstávají z Homebrew.
@@ -22,8 +23,8 @@ Range a TimeSeekRange s hlavičkami DLNA.ORG_* napíšeme sami. ffmpeg a ffprobe
 
 ```
 macos/
-  Package.swift            MinorCore (knihovna), minordlna (CLI: serve/scan pro vývoj), testy
-  MinorDLNA.xcodeproj      app target (SwiftUI) nad MinorCore, nové bundle ID
+  Package.swift            MinorCore (knihovna), MinorDLNA (SwiftUI app), testy; bez .xcodeproj,
+                           bundle skládá packaging/build-app.sh (bundle ID cz.minordlna.app)
   Sources/MinorCore/       Settings, Store, Library, Media, Metadata, Transcode, Stream,
                            SSDP, UPnP (DMS, DMC), Web, Update
   Sources/MinorDLNA/       MenuBarExtra, okna Přehled/Nastavení, NSOpenPanel, SMAppService
@@ -34,7 +35,7 @@ macos/
 
 | # | Obsah | Hotovo, když |
 |---|---|---|
-| S1 | Kostra: SwiftPM + Xcode, MenuBarExtra, Settings, logování, build-app.sh a podpis, CI | App se spustí z lišty a uloží nastavení |
+| S1 | Kostra: SwiftPM, MenuBarExtra, Settings, logování, build-app.sh a podpis, CI | App se spustí z lišty a uloží nastavení |
 | S2 | HTTP + SSDP + device.xml + CDS Browse nad složkami + direct play s Range | LG server vidí a přehraje MKV/MP4 |
 | S3 | Store, Library (scanner, FSEvents, parser názvů), Media (ffprobe, EXIF, tagy, náhledy, HEIC), GENA | Filmy/Seriály/Hudba/Fotky na TV, 10k položek plynule |
 | S4 | Transcode: profily, rozhodování, VideoToolbox, MPEG-TS, TimeSeekRange, titulky | Převod, posun a titulky na LG |
