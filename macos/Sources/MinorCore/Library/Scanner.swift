@@ -42,6 +42,7 @@ final class LibraryScanner: Service, Sendable {
 
 	let store: Store
 	let libraries: [IndexedLibrary]
+	let prober: Prober
 	let onChange: @Sendable (UInt32) -> Void
 
 	private struct State {
@@ -50,10 +51,12 @@ final class LibraryScanner: Service, Sendable {
 	}
 	private let state = Mutex(State())
 
-	init(store: Store, libraries: [IndexedLibrary], onChange: @escaping @Sendable (UInt32) -> Void) {
+	init(store: Store, libraries: [IndexedLibrary], prober: Prober = Prober(), onChange: @escaping @Sendable (UInt32) -> Void) {
 		self.store = store
 		self.libraries = libraries
+		self.prober = prober
 		self.onChange = onChange
+		if !prober.available { Log.library.warning("ffprobe not found, durations and music tags stay unknown") }
 	}
 
 	func run() async {
@@ -61,7 +64,10 @@ final class LibraryScanner: Service, Sendable {
 			self.scanAll(force: true)
 			var lastFull = Date()
 			while !Task.isCancelled {
-				do { try await Task.sleep(for: Self.checkInterval) } catch { return }
+				// Probing a large import takes minutes; it yields to the folder check every interval.
+				if await !self.probePending(for: Self.checkInterval) {
+					do { try await Task.sleep(for: Self.checkInterval) } catch { return }
+				}
 				let full = Date().timeIntervalSince(lastFull) > Self.fullInterval
 				if full { lastFull = Date() }
 				self.scanAll(force: full)
@@ -288,10 +294,111 @@ final class LibraryScanner: Service, Sendable {
 			for (_, id) in dirs where !used.contains(id) && !missingRoots.contains(dirRoots[id] ?? "") {
 				try db.run("DELETE FROM dir WHERE id = ?", id)
 			}
-			for table in ["show", "album", "artist", "genre"] {
-				try db.run("DELETE FROM \(table) WHERE library_id = ? AND id NOT IN (SELECT \(table)_id FROM item WHERE \(table)_id IS NOT NULL)", lib.id)
-			}
+			try pruneEntities([lib.id])
 			return st
+		}
+	}
+
+	private struct ProbeJob: Sendable {
+		var id: Int64
+		var path: String
+		var rel: String
+		var libID: Int64
+		var music: Bool
+	}
+
+	/// Fills duration, codecs and music tags of new or changed items, two files at a time.
+	/// Returns true when the time budget ran out with items still pending.
+	func probePending(for budget: Duration) async -> Bool {
+		guard prober.available else { return false }
+		let deadline = ContinuousClock.now + budget
+		var touched: Set<Int64> = []
+		defer {
+			if !touched.isEmpty {
+				do {
+					try store.writer.transaction { try pruneEntities(touched) }
+					onChange(try store.bumpUpdateID())
+				} catch {
+					Log.library.error("probe finish failed: \(error, privacy: .public)")
+				}
+			}
+		}
+		while !Task.isCancelled, ContinuousClock.now < deadline {
+			let jobs: [ProbeJob]
+			do {
+				jobs = try store.reader.query("""
+					SELECT i.id, i.path, d.root, i.library_id, l.type FROM item i
+					JOIN dir d ON d.id = i.dir_id JOIN library l ON l.id = i.library_id
+					WHERE i.probed = 0 AND (i.mime LIKE 'video/%' OR i.mime LIKE 'audio/%') LIMIT 32
+					""") { r in
+					let path = r.text(1), root = r.text(2)
+					return ProbeJob(id: r.int64(0), path: path, rel: String(path.dropFirst(root.count + 1)), libID: r.int64(3),
+					                music: r.text(4) == LibraryType.music.rawValue)
+				}
+			} catch {
+				Log.library.error("probe query failed: \(error, privacy: .public)")
+				return false
+			}
+			if jobs.isEmpty { return false }
+			let results = await withTaskGroup(of: (ProbeJob, ProbeInfo?).self) { group in
+				var out: [(ProbeJob, ProbeInfo?)] = []
+				for (i, job) in jobs.enumerated() {
+					if i >= 2, let r = await group.next() { out.append(r) }
+					group.addTask {
+						do { return (job, try await self.prober.probe(job.path)) } catch {
+							Log.library.debug("probe of \(job.path, privacy: .public) failed: \(error, privacy: .public)")
+							return (job, nil)
+						}
+					}
+				}
+				for await r in group { out.append(r) }
+				return out
+			}
+			if Task.isCancelled { return false }
+			do {
+				try save(results)
+				touched.formUnion(results.map(\.0.libID))
+			} catch {
+				Log.library.error("probe save failed: \(error, privacy: .public)")
+				return false
+			}
+		}
+		return !Task.isCancelled
+	}
+
+	private func save(_ results: [(ProbeJob, ProbeInfo?)]) throws {
+		let db = store.writer
+		try db.transaction {
+			var entities: [Int64: Entities] = [:]
+			for (job, info) in results {
+				// Failed probes (2) are retried only when the file changes.
+				guard let p = info else {
+					try db.run("UPDATE item SET probed = 2 WHERE id = ?", job.id)
+					continue
+				}
+				try db.run("""
+					UPDATE item SET probed = 1, duration_ms = ?, bitrate = ?, container = ?, video_codec = ?, audio_codec = ?,
+					width = COALESCE(?, width), height = COALESCE(?, height), pix_fmt = ?, audio_channels = ? WHERE id = ?
+					""", p.durationMs, p.bitrate, p.container, p.videoCodec, p.audioCodec, p.width, p.height, p.pixFmt, p.channels, job.id)
+				guard job.music else { continue }
+				let m = AudioMeta.merge(AudioMeta.fromLayout(rel: job.rel.precomposedStringWithCanonicalMapping, path: job.path), p)
+				var e = entities[job.libID] ?? Entities(db: db, libID: job.libID)
+				let ref = try e.resolve(m)
+				entities[job.libID] = e
+				try db.run("""
+					UPDATE item SET title = ?, sort_title = ?, year = ?, artist = ?, artist_id = ?, album_id = ?, genre_id = ?,
+					disc = ?, track = ?, has_art = ? WHERE id = ?
+					""", m.title, Names.sortKey(m.sortTitle), m.year, m.artist, ref.artist, ref.album, ref.genre, m.disc, m.track, m.hasArt, job.id)
+			}
+		}
+	}
+
+	/// Drops shows, albums, artists and genres no item refers to any more.
+	private func pruneEntities(_ libIDs: Set<Int64>) throws {
+		for lib in libIDs {
+			for table in ["show", "album", "artist", "genre"] {
+				try store.writer.run("DELETE FROM \(table) WHERE library_id = ? AND id NOT IN (SELECT \(table)_id FROM item WHERE \(table)_id IS NOT NULL)", lib)
+			}
 		}
 	}
 
@@ -347,8 +454,15 @@ final class LibraryScanner: Service, Sendable {
 				                 season: ep.season, episode: ep.episode, episodeTitle: ep.title.isEmpty ? nil : ep.title)
 			}
 		case .photos:
-			return Described(title: stem, sortTitle: stem, taken: mtime)
-		case .videos, .music:
+			var d = Described(title: stem, sortTitle: stem, taken: mtime, hasArt: true)
+			if let p = PhotoInfo.read(path) {
+				(d.width, d.height, d.orientation) = (p.width, p.height, p.orientation)
+				if let t = p.taken { d.taken = t }
+			}
+			return d
+		case .music:
+			return AudioMeta.fromLayout(rel: rel, path: path)
+		case .videos:
 			break
 		}
 		return Described(title: stem, sortTitle: stem)
