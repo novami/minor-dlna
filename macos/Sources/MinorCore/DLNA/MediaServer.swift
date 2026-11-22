@@ -161,11 +161,12 @@ struct Routes: Sendable {
 	let cms: Eventer
 	let icons: [Int: Data]
 	let files = FileIO()
+	let thumbnails = Thumbnails()
 
 	init(config: ServerConfig, store: Store, libraries: [IndexedLibrary]) {
 		self.config = config
 		self.store = store
-		catalog = LibraryCatalog(db: store.reader, libraries: libraries)
+		catalog = LibraryCatalog(db: store.reader, libraries: libraries, videoArt: thumbnails.ffmpeg != nil)
 		cds = Eventer { [("SystemUpdateID", String(store.updateID())), ("ContainerUpdateIDs", "")] }
 		cms = Eventer { [("SourceProtocolInfo", MediaFormat.sourceProtocolInfo), ("SinkProtocolInfo", ""), ("CurrentConnectionIDs", "0")] }
 		icons = config.iconURL.map(Self.renderIcons) ?? [:]
@@ -195,6 +196,8 @@ struct Routes: Sendable {
 		}
 		r.get("/media/:token") { req, ctx in try await media(req, ctx) }
 		r.head("/media/:token") { req, ctx in try await media(req, ctx) }
+		r.get("/thumb/:item/:size") { req, ctx in try await thumb(req, ctx) }
+		r.head("/thumb/:item/:size") { req, ctx in try await thumb(req, ctx) }
 		return r
 	}
 
@@ -287,6 +290,18 @@ struct Routes: Sendable {
 		}
 		let body = try await files.loadFile(path: path, range: Int(range.lowerBound)...Int(range.upperBound), context: ctx)
 		return Response(status: status, headers: h, body: body)
+	}
+
+	private func thumb(_ req: Request, _ ctx: DLNAContext) async throws -> Response {
+		guard let size = RenditionSize.named((ctx.parameters.get("size") ?? "").replacingOccurrences(of: ".jpg", with: "")),
+		      let obj = catalog.media(Substring(ctx.parameters.get("item") ?? "")),
+		      let url = await thumbnails.get(obj, size),
+		      let bytes = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? nil
+		else { return Response(status: .notFound) }
+		var h: HTTPFields = [.contentType: "image/jpeg", .cacheControl: "max-age=86400", .contentLength: String(bytes), .transferMode: "Interactive"]
+		if req.headers[.getContentFeatures] == "1" { h[.contentFeatures] = size.contentFeatures }
+		if req.method == .head { return Response(status: .ok, headers: h) }
+		return Response(status: .ok, headers: h, body: try await files.loadFile(path: url.path, context: ctx))
 	}
 
 	// MARK: -

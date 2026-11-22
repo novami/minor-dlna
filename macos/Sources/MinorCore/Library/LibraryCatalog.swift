@@ -22,6 +22,9 @@ struct CatalogObject: Sendable, Equatable {
 	var genre: String?
 	var track: Int?
 	var subtitle: String?
+	var orientation: Int?
+	/// Item whose thumbnail is the album art (/thumb/<id>/tn.jpg).
+	var artItem: Int64?
 }
 
 /// Browses the index. Object IDs never contain paths:
@@ -35,6 +38,8 @@ struct CatalogObject: Sendable, Equatable {
 struct LibraryCatalog: Sendable {
 	let db: Database
 	let libraries: [IndexedLibrary]
+	/// Videos get a frame as thumbnail (needs ffmpeg).
+	var videoArt = false
 	static let recentLimit = 50
 
 	static let classAlbum = "object.container.album.musicAlbum"
@@ -256,11 +261,12 @@ struct LibraryCatalog: Sendable {
 		throws -> ([CatalogObject], Int)
 	{
 		let all = try db.query("""
-			SELECT al.id, al.title, ar.name, COUNT(i.id) FROM album al JOIN artist ar ON ar.id = al.artist_id
-			JOIN item i ON i.album_id = al.id WHERE \(filter) GROUP BY al.id ORDER BY \(order)
+			SELECT al.id, al.title, ar.name, COUNT(i.id), MIN(CASE WHEN i.has_art THEN i.id END) FROM album al
+			JOIN artist ar ON ar.id = al.artist_id JOIN item i ON i.album_id = al.id WHERE \(filter) GROUP BY al.id ORDER BY \(order)
 			""", args) { r in
 			var o = container("B\(r.int64(0))", parent, r.text(1), r.int(3), Self.classAlbum)
 			o.artist = r.text(2)
+			o.artItem = r.isNull(4) ? nil : r.int64(4)
 			return o
 		}
 		return page(all, start, count)
@@ -326,7 +332,8 @@ struct LibraryCatalog: Sendable {
 	{
 		try db.query("""
 			SELECT i.id, i.library_id, i.dir_id, i.path, i.name, i.size, i.mtime, i.title, i.year, i.season, i.episode,
-			i.episode_title, i.duration_ms, i.width, i.height, s.name, i.taken_at, i.artist, al.title, g.name, i.track, i.subtitle
+			i.episode_title, i.duration_ms, i.width, i.height, s.name, i.taken_at, i.artist, al.title, g.name, i.track, i.subtitle,
+			i.orientation, i.has_art
 			FROM item i LEFT JOIN show s ON s.id = i.show_id LEFT JOIN album al ON al.id = i.album_id LEFT JOIN genre g ON g.id = i.genre_id
 			WHERE \(filter) ORDER BY \(order) LIMIT ? OFFSET ?
 			""", args + [limit, start]) { r in
@@ -346,6 +353,8 @@ struct LibraryCatalog: Sendable {
 			o.genre = r.optText(19)
 			o.track = r.optInt(20)
 			o.subtitle = r.optText(21)
+			o.orientation = r.optInt(22)
+			if r.bool(23) || (videoArt && o.format?.kind == .video) { o.artItem = id }
 			if let lib = libraries.first(where: { $0.id == r.int64(1) }) {
 				o.title = Self.displayTitle(lib.type, tc, o.title, year: o.year, show: r.optText(15), season: r.optInt(9) ?? 0,
 				                            episode: r.optInt(10) ?? 0, episodeTitle: r.optText(11))

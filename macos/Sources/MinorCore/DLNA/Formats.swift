@@ -25,6 +25,9 @@ public struct MediaFormat: Sendable, Equatable {
 		"jpeg": .init(kind: .image, mime: "image/jpeg"),
 		"png": .init(kind: .image, mime: "image/png"),
 		"gif": .init(kind: .image, mime: "image/gif"),
+		// TVs get HEIC only as generated JPEG.
+		"heic": .init(kind: .image, mime: "image/heic"),
+		"heif": .init(kind: .image, mime: "image/heif"),
 		"mp3": .init(kind: .audio, mime: "audio/mpeg"),
 		"flac": .init(kind: .audio, mime: "audio/flac"),
 		"m4a": .init(kind: .audio, mime: "audio/mp4"),
@@ -50,7 +53,7 @@ public struct MediaFormat: Sendable, Equatable {
 
 	/// Everything the server can serve (ConnectionManager GetProtocolInfo).
 	public static var sourceProtocolInfo: String {
-		Set(byExtension.values.map(\.mime)).sorted().map { "http-get:*:\($0):*" }.joined(separator: ",")
+		Set(byExtension.values.map(\.mime)).subtracting(["image/heic", "image/heif"]).sorted().map { "http-get:*:\($0):*" }.joined(separator: ",")
 	}
 }
 

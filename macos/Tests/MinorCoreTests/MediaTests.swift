@@ -67,3 +67,34 @@ func probeMusic() async throws {
 	#expect(track.title.contains("Píseň") && track.artist == "Host" && (track.durationMs ?? 0) > 900)
 	#expect(store.updateID() == 2)
 }
+
+private func writeImage(_ url: URL, type: String, width: Int, height: Int, orientation: Int) throws {
+	let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+	                    bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+	let dest = try #require(CGImageDestinationCreateWithURL(url as CFURL, type as CFString, 1, nil))
+	CGImageDestinationAddImage(dest, ctx.makeImage()!, [kCGImagePropertyOrientation: orientation] as CFDictionary)
+	#expect(CGImageDestinationFinalize(dest))
+}
+
+/// A rotated HEIC is served only as upright JPEG renditions, never upscaled.
+@Test func photoRenditions() async throws {
+	let dir = FileManager.default.temporaryDirectory.appending(path: "minordlna-\(UUID())")
+	defer { try? FileManager.default.removeItem(at: dir) }
+	try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+	let src = dir.appending(path: "IMG_1.heic")
+	try writeImage(src, type: "public.heic", width: 400, height: 300, orientation: 6)
+	var o = CatalogObject(id: "I7", parentID: "D1", title: "IMG_1", isContainer: false)
+	(o.path, o.format, o.size, o.width, o.height, o.orientation) = (src.path, MediaFormat.lookup("x.heic"), 1, 400, 300, 6)
+	o.modified = Date()
+
+	let thumbs = Thumbnails(dir: dir.appending(path: "cache"), ffmpeg: nil)
+	for (size, w, h) in [("sm", 300, 400), ("tn", 120, 160)] {
+		let url = try #require(await thumbs.get(o, RenditionSize.named(size)!))
+		let p = try #require(PhotoInfo.read(url.path))
+		#expect(p.width == w && p.height == h && (p.orientation ?? 1) == 1)
+		#expect(CGImageSourceGetType(CGImageSourceCreateWithURL(url as CFURL, nil)!) as String? == "public.jpeg")
+	}
+	let didl = DIDL.render([o], baseURL: "http://h")
+	#expect(didl.contains(#">http://h/thumb/7/lrg.jpg</res><res protocolInfo="http-get:*:image/jpeg:DLNA.ORG_PN=JPEG_SM"#))
+	#expect(!didl.contains("/media/"))
+}

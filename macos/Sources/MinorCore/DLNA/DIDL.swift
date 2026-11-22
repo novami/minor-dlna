@@ -15,7 +15,7 @@ enum DIDL {
 				if let n = o.childCount { b += #" childCount="\#(n)""# }
 				b += "><dc:title>\(o.title.xmlEscaped)</dc:title><upnp:class>\(o.upnpClass ?? "object.container.storageFolder")</upnp:class>"
 				if let a = o.artist { b += "<upnp:artist>\(a.xmlEscaped)</upnp:artist>" }
-				b += "</container>"
+				b += art(o, baseURL) + "</container>"
 			} else if let f = o.format {
 				b += #"<item id="\#(o.id.xmlEscaped)" parentID="\#(o.parentID.xmlEscaped)" restricted="1">"#
 				b += "<dc:title>\(o.title.xmlEscaped)</dc:title><upnp:class>\(itemClass(f.kind))</upnp:class>"
@@ -32,15 +32,52 @@ enum DIDL {
 					if let t = o.track, t > 0 { b += "<upnp:originalTrackNumber>\(t)</upnp:originalTrackNumber>" }
 				}
 				if let g = o.genre { b += "<upnp:genre>\(g.xmlEscaped)</upnp:genre>" }
-				b += #"<res protocolInfo="\#(f.protocolInfo.xmlEscaped)""#
-				if o.size > 0 { b += #" size="\#(o.size)""# }
-				if let d = o.durationMs, d > 0 { b += #" duration="\#(duration(d))""# }
-				if let w = o.width, let h = o.height, w > 0, h > 0 { b += #" resolution="\#(w)x\#(h)""# }
-				b += ">\((baseURL + mediaPath(o)).xmlEscaped)</res></item>"
+				b += art(o, baseURL)
+				if f.kind == .image {
+					b += photoRes(o, baseURL)
+				} else {
+					b += res(f.protocolInfo, o.size, o.durationMs, o.width, o.height, baseURL + mediaPath(o))
+				}
+				b += "</item>"
 			}
 		}
 		return b + "</DIDL-Lite>"
 	}
+
+	private static func art(_ o: CatalogObject, _ baseURL: String) -> String {
+		guard let n = o.artItem, o.format?.kind != .image else { return "" }
+		return #"<upnp:albumArtURI dlna:profileID="JPEG_TN">\#((baseURL + thumbPath(n, "tn")).xmlEscaped)</upnp:albumArtURI>"#
+	}
+
+	/// A TV-sized rendition first (LG picks the first resource), then the original and smaller sizes. HEIC only as JPEG.
+	private static func photoRes(_ o: CatalogObject, _ baseURL: String) -> String {
+		guard let n = Int64(o.id.dropFirst()), let f = o.format else { return "" }
+		var b = ""
+		let derived = { (size: String) in
+			let s = RenditionSize.named(size)!
+			return res(s.protocolInfo, 0, nil, nil, nil, baseURL + thumbPath(n, size))
+		}
+		if Thumbnails.servesOriginal(o) {
+			b += res(RenditionSize.named("lrg")!.protocolInfo.replacingOccurrences(of: "CI=1", with: "CI=0"), o.size, nil, o.width, o.height,
+			         baseURL + mediaPath(o))
+		} else {
+			b += derived("lrg")
+			if f.mime != "image/heic", f.mime != "image/heif" {
+				b += res(f.protocolInfo, o.size, nil, o.width, o.height, baseURL + mediaPath(o))
+			}
+		}
+		return b + derived("sm") + derived("tn")
+	}
+
+	private static func res(_ protocolInfo: String, _ size: Int64, _ durationMs: Int?, _ w: Int?, _ h: Int?, _ url: String) -> String {
+		var b = #"<res protocolInfo="\#(protocolInfo.xmlEscaped)""#
+		if size > 0 { b += #" size="\#(size)""# }
+		if let d = durationMs, d > 0 { b += #" duration="\#(duration(d))""# }
+		if let w, let h, w > 0, h > 0 { b += #" resolution="\#(w)x\#(h)""# }
+		return b + ">\(url.xmlEscaped)</res>"
+	}
+
+	static func thumbPath(_ item: Int64, _ size: String) -> String { "/thumb/\(item)/\(size).jpg" }
 
 	/// /media/<id>.<ext>; the extension helps clients that guess the type from the URL.
 	static func mediaPath(_ o: CatalogObject) -> String {
