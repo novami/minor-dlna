@@ -19,6 +19,7 @@ public struct ServerConfig: Sendable, Equatable {
 	public var transcode: TranscodeSettings
 	public var remote: RemoteSettings
 	public var metadata: Bool
+	public var autoNextEpisode: Bool
 
 	public init(settings: Settings, version: String, iconURL: URL?, databaseURL: URL = Store.defaultURL) {
 		name = settings.name.trimmingCharacters(in: .whitespaces).isEmpty ? "MinorDLNA" : settings.name
@@ -31,6 +32,7 @@ public struct ServerConfig: Sendable, Equatable {
 		transcode = settings.transcode
 		remote = settings.remote
 		metadata = settings.metadata
+		autoNextEpisode = settings.autoNextEpisode
 	}
 }
 
@@ -192,10 +194,12 @@ public actor MediaServer {
 	public func tvDevices() async -> [Renderer] { await running?.routes.tv.devices() ?? [] }
 	public func tvSearch() async throws -> [Renderer] { try await tv.search() }
 	public func tvWake(_ udn: String) async throws { try await tv.wake(udn) }
+	/// Applies to the running session too.
+	public func setAutoNextEpisode(_ on: Bool) async { await running?.routes.tv.setAutoNext(on) }
 	public func tvStatus() async -> TVStatus? { await running?.routes.tv.status() }
 	public func tvCommand(_ c: TVCommand) async throws { try await tv.command(c) }
 
-	/// fromMs > 0 resumes a few seconds before it.
+	/// fromMs > 0 resumes there.
 	public func tvPlay(udn: String, itemID: String, fromMs: Int = 0) async throws {
 		try await tv.play(udn: udn, id: itemID, fromMs: fromMs)
 	}
@@ -274,7 +278,8 @@ struct Routes: Sendable {
 		catalog = LibraryCatalog(db: store.reader, libraries: libraries, videoArt: thumbnails.ffmpeg != nil)
 		let cds = Eventer { [("SystemUpdateID", String(store.updateID())), ("ContainerUpdateIDs", "")] }
 		self.cds = cds
-		tv = TVController(store: store, catalog: catalog, port: config.port, profiles: profiles, transcode: transcoder.available) {
+		tv = TVController(store: store, catalog: catalog, port: config.port, profiles: profiles, transcode: transcoder.available,
+		                  autoNext: config.autoNextEpisode) {
 			_ = try? store.bumpUpdateID()
 			Task { await cds.notifyAll() }
 		}

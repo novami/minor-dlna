@@ -81,16 +81,26 @@ import Testing
 
 		try await c.play(udn: "uuid:tv", id: eps[0].id, fromMs: 65000)
 		try await until("playing") { await c.status()?.state == .playing && !tv.withLock(\.seeks).isEmpty }
-		#expect(tv.withLock(\.seeks) == ["0:01:00"])
+		#expect(tv.withLock(\.seeks) == ["0:01:05"])
 		#expect(tv.withLock(\.uris).first?.hasSuffix(DIDL.mediaPath(eps[0])) == true)
 
-		// Played to the end: the next episode follows, the first counts as watched.
-		tv.withLock { $0.pos = "0:44:50" }
-		try await until("near the end") { await c.status()?.positionMs == 2_690_000 }
-		tv.withLock { $0.pos = "0:00:00"; $0.state = "STOPPED" }
-		try await until("next episode") { tv.withLock(\.uris).count == 2 }
-		#expect(await c.status()?.itemID == eps[1].id)
+		// Played to the end: it counts as watched, and the next episode follows only when that is switched on.
+		func playToEnd() async throws {
+			tv.withLock { $0.pos = "0:44:50" }
+			try await until("near the end") { await c.status()?.positionMs == 2_690_000 }
+			tv.withLock { $0.pos = "0:00:00"; $0.state = "STOPPED" }
+		}
+		try await playToEnd()
+		try await until("stopped") { await c.status()?.state == .stopped }
+		#expect(tv.withLock(\.uris).count == 1)
 		#expect(try cat.metadata(eps[0].id).watched)
+
+		await c.setAutoNext(true)
+		try await c.play(udn: "uuid:tv", id: eps[0].id, fromMs: 0)
+		try await until("playing again") { await c.status()?.state == .playing }
+		try await playToEnd()
+		try await until("next episode") { tv.withLock(\.uris).count == 3 }
+		#expect(await c.status()?.itemID == eps[1].id)
 
 		tv.withLock { $0.pos = "0:10:00"; $0.state = "PLAYING" }
 		try await until("second playing") { await c.status()?.positionMs == 600_000 }

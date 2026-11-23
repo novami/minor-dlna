@@ -2,7 +2,7 @@ import Foundation
 
 extension Store {
 	/// Played this far counts as watched and the saved position is cleared.
-	static let watchedRatio = 0.9
+	static let watchedRatio = 0.95
 
 	/// Records how far the file was played; durationMs 0 keeps the known duration.
 	func savePosition(path: String, positionMs: Int, durationMs: Int) throws {

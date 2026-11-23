@@ -15,6 +15,9 @@ final class AppModel {
 				if settings.transcode.clients != oldValue.transcode.clients {
 					Task { [server, clients = settings.transcode.clients] in await server.chooseProfiles(clients) }
 				}
+				if settings.autoNextEpisode != oldValue.autoNextEpisode {
+					Task { [server, on = settings.autoNextEpisode] in await server.setAutoNextEpisode(on) }
+				}
 				if settings.remote != oldValue.remote {
 					Task { [server, remote = settings.remote] in await server.setRemote(remote) }
 				}
@@ -62,11 +65,12 @@ final class AppModel {
 		ServerConfig(settings: s, version: Self.version, iconURL: Bundle.main.url(forResource: "AppIcon", withExtension: "icns"))
 	}
 
-	/// Hand-picked client profiles and web access apply without a restart.
+	/// Hand-picked client profiles, web access and the next episode apply without a restart.
 	private func restartConfig(_ s: Settings) -> ServerConfig {
 		var s = s
 		s.transcode.clients = [:]
 		s.remote = .init()
+		s.autoNextEpisode = false
 		return serverConfig(s)
 	}
 

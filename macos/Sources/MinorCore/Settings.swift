@@ -30,9 +30,12 @@ public struct Settings: Codable, Equatable, Sendable {
 	public var metadata: Bool
 	public var transcode: TranscodeSettings
 	public var remote: RemoteSettings
+	/// After an episode played to the end on a TV, the next one starts.
+	public var autoNextEpisode: Bool
 
 	public init(name: String = Host.current().localizedName ?? "MinorDLNA", uuid: UUID = UUID(), port: Int = 8200,
-	            libraries: [Library] = [], autoUpdate: Bool = true, transcode: TranscodeSettings = .init(), remote: RemoteSettings = .init(), metadata: Bool = true) {
+	            libraries: [Library] = [], autoUpdate: Bool = true, transcode: TranscodeSettings = .init(), remote: RemoteSettings = .init(), metadata: Bool = true,
+	            autoNextEpisode: Bool = false) {
 		self.name = name
 		self.uuid = uuid
 		self.port = port
@@ -41,6 +44,7 @@ public struct Settings: Codable, Equatable, Sendable {
 		self.metadata = metadata
 		self.transcode = transcode
 		self.remote = remote
+		self.autoNextEpisode = autoNextEpisode
 	}
 
 	public init(from decoder: Decoder) throws {
@@ -54,6 +58,7 @@ public struct Settings: Codable, Equatable, Sendable {
 		metadata = try c.decodeIfPresent(Bool.self, forKey: .metadata) ?? d.metadata
 		transcode = try c.decodeIfPresent(TranscodeSettings.self, forKey: .transcode) ?? d.transcode
 		remote = try c.decodeIfPresent(RemoteSettings.self, forKey: .remote) ?? d.remote
+		autoNextEpisode = try c.decodeIfPresent(Bool.self, forKey: .autoNextEpisode) ?? d.autoNextEpisode
 	}
 
 	public static let portRange = 1024...65535

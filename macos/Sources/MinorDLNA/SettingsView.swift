@@ -43,6 +43,9 @@ private struct GeneralTab: View {
 					set: { if Settings.portRange.contains($0) { model.settings.port = $0 } }
 				), format: .number.grouping(.never))
 			}
+			Section("Přehrávání na TV") {
+				Toggle("Po dohrání dílu spustit další", isOn: $model.settings.autoNextEpisode)
+			}
 			WebSection()
 			Section("Aplikace") {
 				Toggle("Spouštět při přihlášení", isOn: $model.launchAtLogin)

@@ -31,13 +31,11 @@ public enum TVCommand: Sendable {
 /// Plays library items on one TV at a time and records how far they were watched.
 actor TVController: Service {
 	static let saveEvery: Duration = .seconds(10)
-	/// Resume a little before the saved position.
-	static let resumeLeadMs = 5000
 	/// TV boot until its renderer answers.
 	static let wakeTimeout: Duration = .seconds(60)
 	/// Missed polls before the TV counts as off.
 	static let maxFailures = 5
-	/// This close to the end counts as played through, so the next episode follows.
+	/// This close to the end counts as played through, so the next episode may follow.
 	static let endSlackMs = 15000
 	/// How long the final state of an ended session stays visible.
 	static let lastShown: TimeInterval = 15
@@ -69,6 +67,7 @@ actor TVController: Service {
 	let pollEvery: Duration
 	/// An item finished or stopped with new progress, so the TV's library view can show it.
 	let onProgress: @Sendable () -> Void
+	private var autoNext: Bool
 
 	private var online: [String: Renderer] = [:]
 	private var session: Session?
@@ -76,12 +75,13 @@ actor TVController: Service {
 	private var searching: Task<Void, any Error>?
 
 	init(store: Store, catalog: LibraryCatalog, port: Int, profiles: ClientProfiles, transcode: Bool,
-	     pollEvery: Duration = .seconds(2), onProgress: @escaping @Sendable () -> Void) {
+	     autoNext: Bool = false, pollEvery: Duration = .seconds(2), onProgress: @escaping @Sendable () -> Void) {
 		self.store = store
 		self.catalog = catalog
 		self.port = port
 		self.profiles = profiles
 		self.transcode = transcode
+		self.autoNext = autoNext
 		self.pollEvery = pollEvery
 		self.onProgress = onProgress
 	}
@@ -149,6 +149,8 @@ actor TVController: Service {
 		try await Discovery.wake(mac: d.mac)
 	}
 
+	func setAutoNext(_ on: Bool) { autoNext = on }
+
 	// MARK: Session
 
 	/// The running session, or the final state of one that just ended.
@@ -158,7 +160,7 @@ actor TVController: Service {
 		return nil
 	}
 
-	/// Starts item id on the TV, from fromMs (minus a few seconds) when positive. Returns at once;
+	/// Starts item id on the TV, from fromMs when positive. Returns at once;
 	/// waking the TV and loading show up in status().
 	func play(udn: String, id: String, fromMs: Int) throws {
 		guard let item = try? catalog.metadata(id), !item.isContainer, let kind = item.format?.kind, kind == .video || kind == .audio else {
@@ -167,7 +169,7 @@ actor TVController: Service {
 		let d = try known(udn)
 		let s = Session(dev: d, item: item, st: TVStatus(udn: d.udn, tv: d.name, itemID: item.id, title: item.title, state: .starting,
 		                                                 durationMs: item.durationMs ?? 0))
-		if fromMs > 0 { s.resume = max(fromMs - Self.resumeLeadMs, 1) }
+		s.resume = max(fromMs, 0)
 		session?.task?.cancel()
 		session = s
 		last = nil
@@ -300,11 +302,11 @@ actor TVController: Service {
 		// Stopped after playing: by the user, or at the end.
 		save(s)
 		let atEnd = s.st.durationMs > 0 && s.st.positionMs >= s.st.durationMs - Self.endSlackMs
-		if atEnd, let next = catalog.nextEpisode(s.item.id) {
+		if atEnd, autoNext, let next = catalog.nextEpisode(s.item.id) {
 			onProgress()
 			s.item = next
 			s.started = false
-			s.resume = next.positionMs > 0 && !next.watched ? max(next.positionMs - Self.resumeLeadMs, 1) : 0
+			s.resume = next.watched ? 0 : next.positionMs
 			s.st = TVStatus(udn: s.st.udn, tv: s.st.tv, itemID: next.id, title: next.title, state: .starting, durationMs: next.durationMs ?? 0,
 			                volume: s.st.volume, muted: s.st.muted, canVolume: s.st.canVolume)
 			do {
