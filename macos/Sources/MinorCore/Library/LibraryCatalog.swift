@@ -96,6 +96,32 @@ struct LibraryCatalog: Sendable {
 			""", "i.season, i.episode", 0, 1, [n, n]).first
 	}
 
+	/// Shows whose name and playable items whose title contain every word of q, ignoring case and diacritics.
+	func search(_ q: String, limit: Int = 100) -> [CatalogObject] {
+		let words = Self.fold(q).split(separator: " ").map(String.init)
+		guard !words.isEmpty else { return [] }
+		let hit = { (s: String) in let f = Self.fold(s); return words.allSatisfy { f.contains($0) } }
+		do {
+			let shows = try db.query("""
+				SELECT s.id, COALESCE(ms.title, s.name), COUNT(i.id), ms.id, ms.poster, ms.overview, ms.genres, s.name, s.library_id
+				FROM show s JOIN item i ON i.show_id = s.id \(Self.showMeta) GROUP BY s.id ORDER BY COALESCE(ms.sort_title, s.sort_name)
+				""") { r in hit(r.text(1) + " " + r.text(7)) ? showContainer(r, parent: "L\(r.int64(8))/shows") : nil }.compactMap { $0 }
+			let ids = try db.query("""
+				SELECT i.id, i.title, IFNULL(i.episode_title, ''), IFNULL(m.title, ''), IFNULL(i.artist, '')
+				FROM item i LEFT JOIN show s ON s.id = i.show_id \(Self.movieMeta)
+				WHERE (SELECT type FROM library WHERE id = i.library_id) IN ('movies', 'shows', 'videos', 'music')
+				""") { r in hit([1, 2, 3, 4].map { r.text($0) }.joined(separator: " ")) ? r.int64(0) : nil }.compactMap { $0 }
+			let found = ids.isEmpty ? [] : try items("", .recent, "i.id IN (\(ids.prefix(limit).map(String.init).joined(separator: ",")))",
+			                                         Self.titleOrder, 0, limit, [])
+			return Array((shows + found).prefix(limit))
+		} catch {
+			Log.library.error("search failed: \(error, privacy: .public)")
+			return []
+		}
+	}
+
+	static func fold(_ s: String) -> String { s.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil) }
+
 	// MARK: -
 
 	private struct IsItem: Error {}

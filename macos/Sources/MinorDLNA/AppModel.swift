@@ -26,6 +26,7 @@ final class AppModel {
 	private(set) var status: ServerStatus?
 	private(set) var cacheSize: Int64?
 	@ObservationIgnored private(set) var updates: UpdateModel!
+	@ObservationIgnored private(set) var tv: TVModel!
 	@ObservationIgnored private let server = MediaServer()
 	@ObservationIgnored private var restartTask: Task<Void, Never>?
 
@@ -52,6 +53,7 @@ final class AppModel {
 			for await state in states { self?.serverState = state }
 		}
 		scheduleRestart(after: .zero)
+		tv = TVModel(server: server)
 		updates = UpdateModel(auto: { [weak self] in self?.settings.autoUpdate ?? false },
 		                      busy: { [weak self] in await self?.server.status()?.transcodes.isEmpty == false })
 	}
@@ -94,6 +96,12 @@ final class AppModel {
 		let hash = await Task.detached { WebPassword.hash(password) }.value
 		settings.remote.passwordHash = hash
 	}
+
+	func browse(_ id: String) async -> BrowsePage? { await server.browse(id) }
+	func search(_ query: String) async -> [BrowseEntry] { await server.search(query) }
+
+	/// Poster or thumbnail served by the running server.
+	func artURL(_ path: String?) -> URL? { path.flatMap { URL(string: "http://localhost:\(settings.port)\($0)") } }
 
 	var webURL: URL? { URL(string: "http://localhost:\(settings.port)/") }
 

@@ -177,6 +177,13 @@ public actor MediaServer {
 	}
 
 	/// Applies hand-picked client profiles without a restart.
+	// MARK: Library
+
+	/// A container's entries; nil when it does not exist (anymore).
+	public func browse(_ id: String) -> BrowsePage? { try? running?.routes.catalog.page(id) }
+
+	public func search(_ query: String) -> [BrowseEntry] { running?.routes.catalog.search(query).map(BrowseEntry.init) ?? [] }
+
 	// MARK: Play on TV
 
 	private var tv: TVController {

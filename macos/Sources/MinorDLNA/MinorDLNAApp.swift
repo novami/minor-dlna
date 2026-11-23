@@ -10,6 +10,10 @@ struct MinorDLNAApp: App {
 		MenuBarExtra("MinorDLNA", systemImage: "play.tv") {
 			MenuContent().environment(model)
 		}
+		Window("Knihovna", id: "library") {
+			LibraryView().environment(model)
+		}
+		.defaultSize(width: 720, height: 620)
 		Window("Přehled", id: "overview") {
 			OverviewView().environment(model)
 		}
@@ -33,7 +37,17 @@ private struct MenuContent: View {
 		if case let .available(rel) = model.updates.phase, model.updates.installable {
 			Button("Nainstalovat verzi \(rel.version)") { Task { await model.updates.install(rel) } }
 		}
+		if let st = model.tv.status, st.state != .stopped {
+			Divider()
+			Text("\(st.state == .paused ? "Pozastaveno" : "Hraje") na \(st.tv): \(st.title)")
+			Button(st.state == .playing ? "Pozastavit" : "Pokračovat") { Task { await model.tv.command(st.state == .playing ? .pause : .play) } }
+			Button("Zastavit") { Task { await model.tv.command(.stop) } }
+		}
 		Divider()
+		Button("Knihovna…") {
+			NSApp.activate()
+			openWindow(id: "library")
+		}
 		Button("Přehled…") {
 			NSApp.activate()
 			openWindow(id: "overview")

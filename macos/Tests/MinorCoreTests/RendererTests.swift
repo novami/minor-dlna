@@ -40,6 +40,7 @@ import Testing
 	let season = try #require(try cat.children("L\(libs[0].id)/shows", start: 0, count: 0).objects.first).id + "/1"
 	let eps = try cat.children(season, start: 0, count: 0).objects
 	#expect(cat.nextEpisode(eps[0].id)?.id == eps[1].id && cat.nextEpisode(eps[1].id) == nil)
+	#expect(cat.search("PRVNI").map(\.id) == [eps[0].id] && cat.search("show").first?.isContainer == true)
 
 	struct TV { var state = "NO_MEDIA_PRESENT", uri = "", pos = "0:00:00", uris: [String] = [], seeks: [String] = [] }
 	let tv = Mutex(TV())
