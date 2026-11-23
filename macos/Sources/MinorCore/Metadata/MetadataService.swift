@@ -27,8 +27,7 @@ public struct MetaEntry: Sendable, Equatable, Identifiable {
 final class MetadataService: Service, Sendable {
 	static let refreshAfter: TimeInterval = 30 * 24 * 3600
 	static let retryAfter: TimeInterval = 7 * 24 * 3600
-	/// Also how soon posters purged from the caches come back.
-	static let passInterval = Duration.seconds(3600)
+	static let passInterval = Duration.seconds(6 * 3600)
 	/// Between lookups, to be gentle to the free APIs.
 	static let pause = Duration.milliseconds(300)
 	/// In the caches: clearing the cache (or macOS purging it) only means downloading the posters again.
@@ -53,6 +52,13 @@ final class MetadataService: Service, Sendable {
 	func kick() { kicked.withLock { $0 = true } }
 
 	func run() async {
+		// Posters deleted from outside (macOS purging the caches) come back at once.
+		try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+		let watcher = FolderWatcher(paths: [FolderWatcher.realPath(dir.deletingLastPathComponent().path)], latency: 3) { [weak self] _ in
+			guard let self, (try? self.refetchMissingPosters()) == true else { return }
+			self.kick()
+		}
+		defer { withExtendedLifetime(watcher) {} }
 		await cancelWhenGracefulShutdown {
 			var last = ContinuousClock.now
 			while !Task.isCancelled {
@@ -130,17 +136,19 @@ final class MetadataService: Service, Sendable {
 		try refetchMissingPosters()
 	}
 
-	/// Matches whose poster file is gone are looked up again on this pass.
-	func refetchMissingPosters() throws {
+	/// Matches whose poster file is gone are looked up again on the next pass; true when some were.
+	@discardableResult
+	func refetchMissingPosters() throws -> Bool {
 		let missing = try store.reader.query("SELECT id FROM title_match WHERE poster = 1") { $0.int64(0) }.filter { id in
 			!["tn", "sm"].allSatisfy { FileManager.default.fileExists(atPath: posterFile(id, $0).path) }
 		}
-		guard !missing.isEmpty else { return }
+		guard !missing.isEmpty else { return false }
 		try store.writer.transaction {
 			for id in missing { _ = try store.writer.run("UPDATE title_match SET poster = 0, checked_at = 0 WHERE id = ?", id) }
 		}
 		Log.library.info("\(missing.count) posters missing, downloading them again")
 		onChange()
+		return true
 	}
 
 	/// Matches one row automatically, or refreshes a match by hand. Only network failures are thrown.
