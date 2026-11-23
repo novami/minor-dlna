@@ -35,6 +35,10 @@ enum DIDL {
 					if let t = o.track, t > 0 { b += "<upnp:originalTrackNumber>\(t)</upnp:originalTrackNumber>" }
 				}
 				if let g = o.genre { b += "<upnp:genre>\(g.xmlEscaped)</upnp:genre>" }
+				if f.kind == .video, o.positionMs > 0 {
+					// UPnP AV bookmark; whether LG resumes from it is unverified.
+					b += "<upnp:lastPlaybackPosition>\(duration(o.positionMs))</upnp:lastPlaybackPosition>"
+				}
 				b += details(o) + art(o, baseURL)
 				let subs = o.subtitle != nil ? Int64(o.id.dropFirst()).map { baseURL + Subtitles.path(item: $0) } : nil
 				if let subs { b += #"<sec:CaptionInfoEx sec:type="srt">\#(subs.xmlEscaped)</sec:CaptionInfoEx>"# }
@@ -43,13 +47,9 @@ enum DIDL {
 				} else {
 					// Sony, Philips and some Android players read subtitles from pv: attributes of the media resource.
 					let attrs = subs.map { #" pv:subtitleFileType="SRT" pv:subtitleFileUri="\#($0.xmlEscaped)""# } ?? ""
-					let plan = profile.map { Plan.decide($0, o) } ?? .direct
-					if !plan.isDirect, let n = Int64(o.id.dropFirst()) {
-						// Only the converted stream: offering the original too lets the TV pick a format it can't play.
-						b += res(plan.protocolInfo, 0, o.durationMs, o.width, o.height, baseURL + plan.path(item: n), attrs)
-					} else {
-						b += res(f.protocolInfo, o.size, o.durationMs, o.width, o.height, baseURL + mediaPath(o), attrs)
-					}
+					// Only the converted stream: offering the original too lets the TV pick a format it can't play.
+					let s = stream(o, f, profile)
+					b += res(s.protocolInfo, s.size, o.durationMs, o.width, o.height, baseURL + s.path, attrs)
 				}
 				if let subs { b += res("http-get:*:text/srt:*", 0, nil, nil, nil, subs) }
 				b += "</item>"
@@ -104,6 +104,13 @@ enum DIDL {
 		if let d = durationMs, d > 0 { b += #" duration="\#(duration(d))""# }
 		if let w, let h, w > 0, h > 0 { b += #" resolution="\#(w)x\#(h)""# }
 		return b + ">\(url.xmlEscaped)</res>"
+	}
+
+	/// The URL path an item plays from for this profile (nil: no transcoding), with its size (0 when converted).
+	static func stream(_ o: CatalogObject, _ f: MediaFormat, _ profile: Profile?) -> (path: String, protocolInfo: String, size: Int64) {
+		let plan = profile.map { Plan.decide($0, o) } ?? .direct
+		if !plan.isDirect, let n = Int64(o.id.dropFirst()) { return (plan.path(item: n), plan.protocolInfo, 0) }
+		return (mediaPath(o), f.protocolInfo, o.size)
 	}
 
 	static func thumbPath(_ item: Int64, _ size: String) -> String { "/thumb/\(item)/\(size).jpg" }

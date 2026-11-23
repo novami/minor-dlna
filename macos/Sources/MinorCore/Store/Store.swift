@@ -139,6 +139,26 @@ public final class Store: Sendable {
 			UNIQUE (kind, query)
 		);
 		""",
+		"""
+		-- Watch progress keyed by file path (survives reindexing) and TVs found on the network.
+		CREATE TABLE play_state (
+			path        TEXT PRIMARY KEY,
+			position_ms INTEGER NOT NULL DEFAULT 0,
+			duration_ms INTEGER NOT NULL DEFAULT 0,
+			watched     INTEGER NOT NULL DEFAULT 0,
+			updated_at  INTEGER NOT NULL
+		);
+		CREATE TABLE renderer (
+			udn      TEXT PRIMARY KEY,
+			name     TEXT NOT NULL,
+			maker    TEXT NOT NULL DEFAULT '',
+			model    TEXT NOT NULL DEFAULT '',
+			location TEXT NOT NULL,
+			ip       TEXT NOT NULL,
+			mac      TEXT NOT NULL DEFAULT '',
+			seen_at  INTEGER NOT NULL
+		);
+		""",
 	]
 
 	static func migrate(_ db: Database) throws {

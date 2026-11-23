@@ -78,6 +78,10 @@ public actor MediaServer {
 		web.configure(config.remote)
 		var r = Routes(config: config, store: store, libraries: libraries, web: web)
 		let cds = r.cds
+		r.tv = TVController(store: store, catalog: r.catalog, port: config.port, profiles: r.profiles, transcode: r.transcoder.available) {
+			_ = try? store.bumpUpdateID()
+			Task { await cds.notifyAll() }
+		}
 		let meta = config.metadata ? MetadataService(store: store) {
 			_ = try? store.bumpUpdateID()
 			Task { await cds.notifyAll() }
@@ -102,8 +106,8 @@ public actor MediaServer {
 		let group = ServiceGroup(configuration: .init(services: [
 			.init(service: app),
 			.init(service: scanner, successTerminationBehavior: .ignore),
-		] + (meta.map { [.init(service: $0, successTerminationBehavior: .ignore)] } ?? []) + [
-		], logger: logger))
+		] + (meta.map { [.init(service: $0, successTerminationBehavior: .ignore)] } ?? [])
+			+ (routes.tv.map { [.init(service: $0, successTerminationBehavior: .ignore)] } ?? []), logger: logger))
 		self.group = group
 		running = (routes, scanner, libraries)
 		task = Task {
@@ -173,6 +177,26 @@ public actor MediaServer {
 	}
 
 	/// Applies hand-picked client profiles without a restart.
+	// MARK: Play on TV
+
+	private var tv: TVController {
+		get throws {
+			guard let tv = running?.routes.tv else { throw TVError("Server neběží.") }
+			return tv
+		}
+	}
+
+	public func tvDevices() async -> [Renderer] { await running?.routes.tv?.devices() ?? [] }
+	public func tvSearch() async throws -> [Renderer] { try await tv.search() }
+	public func tvWake(_ udn: String) async throws { try await tv.wake(udn) }
+	public func tvStatus() async -> TVStatus? { await running?.routes.tv?.status() }
+	public func tvCommand(_ c: TVCommand) async throws { try await tv.command(c) }
+
+	/// fromMs > 0 resumes a few seconds before it.
+	public func tvPlay(udn: String, itemID: String, fromMs: Int = 0) async throws {
+		try await tv.play(udn: udn, id: itemID, fromMs: fromMs)
+	}
+
 	public func chooseProfiles(_ clients: [String: String]) {
 		running?.routes.profiles.choose(clients)
 	}
@@ -237,6 +261,8 @@ struct Routes: Sendable {
 	let web: WebRoutes
 	/// Set before the server starts; nil when metadata is off.
 	var meta: MetadataService?
+	/// Set before the server starts.
+	var tv: TVController?
 
 	init(config: ServerConfig, store: Store, libraries: [IndexedLibrary], web access: WebAccess = WebAccess()) {
 		self.config = config

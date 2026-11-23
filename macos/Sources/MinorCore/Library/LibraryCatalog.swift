@@ -36,6 +36,9 @@ struct CatalogObject: Sendable, Equatable {
 	var overview: String?
 	var director: String?
 	var cast: [String] = []
+	/// Saved playback position, 0 = from the start.
+	var positionMs = 0
+	var watched = false
 }
 
 /// Browses the index. Object IDs never contain paths:
@@ -82,6 +85,15 @@ struct LibraryCatalog: Sendable {
 	func media(_ name: Substring) -> CatalogObject? {
 		guard let n = Int64(name.prefix { $0 != "." }) else { return nil }
 		return try? items("", .folder, "i.id = ?", "i.id", 0, 1, [n]).first
+	}
+
+	/// The episode after item id in the same show.
+	func nextEpisode(_ id: String) -> CatalogObject? {
+		guard id.first == "I", let n = Int64(id.dropFirst()) else { return nil }
+		return try? items("", .recent, """
+			i.show_id = (SELECT show_id FROM item WHERE id = ?)
+			AND (i.season, i.episode) > (SELECT COALESCE(season, 0), COALESCE(episode, 0) FROM item WHERE id = ?)
+			""", "i.season, i.episode", 0, 1, [n, n]).first
 	}
 
 	// MARK: -
@@ -348,8 +360,9 @@ struct LibraryCatalog: Sendable {
 			SELECT i.id, i.library_id, i.dir_id, i.path, i.name, i.size, i.mtime, i.title, i.year, i.season, i.episode,
 			i.episode_title, i.duration_ms, i.width, i.height, s.name, i.taken_at, i.artist, al.title, g.name, i.track, i.subtitle,
 			i.orientation, i.has_art, i.container, i.video_codec, i.audio_codec, i.pix_fmt, i.audio_channels,
-			m.id, m.title, m.year, m.overview, m.genres, m.director, m.cast, m.poster, ms.title
+			m.id, m.title, m.year, m.overview, m.genres, m.director, m.cast, m.poster, ms.title, p.position_ms, p.watched
 			FROM item i LEFT JOIN show s ON s.id = i.show_id LEFT JOIN album al ON al.id = i.album_id LEFT JOIN genre g ON g.id = i.genre_id
+			LEFT JOIN play_state p ON p.path = i.path
 			\(Self.movieMeta) \(Self.showMeta)
 			WHERE \(filter) ORDER BY \(order) LIMIT ? OFFSET ?
 			""", args + [limit, start]) { r in
@@ -375,6 +388,8 @@ struct LibraryCatalog: Sendable {
 			o.audioCodec = r.optText(26)
 			o.pixFmt = r.optText(27)
 			o.channels = r.optInt(28)
+			o.positionMs = r.optInt(38) ?? 0
+			o.watched = r.bool(39)
 			if r.bool(23) || (videoArt && o.format?.kind == .video) { o.artItem = id }
 			if let mid = r.optInt(29).map(Int64.init) {
 				o.title = r.optText(30) ?? o.title
