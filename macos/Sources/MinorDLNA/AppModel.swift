@@ -25,6 +25,7 @@ final class AppModel {
 	/// Refreshed while the overview or settings window is open.
 	private(set) var status: ServerStatus?
 	private(set) var cacheSize: Int64?
+	@ObservationIgnored private(set) var updates: UpdateModel!
 	@ObservationIgnored private let server = MediaServer()
 	@ObservationIgnored private var restartTask: Task<Void, Never>?
 
@@ -51,6 +52,8 @@ final class AppModel {
 			for await state in states { self?.serverState = state }
 		}
 		scheduleRestart(after: .zero)
+		updates = UpdateModel(auto: { [weak self] in self?.settings.autoUpdate ?? false },
+		                      busy: { [weak self] in await self?.server.status()?.transcodes.isEmpty == false })
 	}
 
 	private func serverConfig(_ s: Settings) -> ServerConfig {

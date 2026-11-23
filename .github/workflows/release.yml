@@ -13,10 +13,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: swift test --package-path macos
-      # Checksums are still signed by the Go tool until the updater moves to Swift (S5).
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
 
       - name: Build app
         env:
@@ -36,7 +32,7 @@ jobs:
           ditto -c -k --norsrc --noextattr --noacl --keepParent MinorDLNA.app "MinorDLNA-${VERSION}-macos.zip"
           shasum -a 256 "MinorDLNA-${VERSION}-macos.zip" > checksums.txt
           cd ..
-          go run ./tools/release sign dist/checksums.txt
+          swift packaging/sign-checksums.swift dist/checksums.txt
 
       - name: Publish
         env:

@@ -46,6 +46,7 @@ private struct GeneralTab: View {
 			Section("Aplikace") {
 				Toggle("Spouštět při přihlášení", isOn: $model.launchAtLogin)
 				Toggle("Instalovat aktualizace automaticky", isOn: $model.settings.autoUpdate)
+				UpdateRow(updates: model.updates)
 			}
 		}
 		.formStyle(.grouped)
@@ -235,6 +236,31 @@ private struct WebSection: View {
 			Text("Webové rozhraní")
 		} footer: {
 			Text("Na tomto Macu se otevře bez hesla přes menu v liště. Jiná zařízení v místní síti se přihlásí heslem.")
+		}
+	}
+}
+
+struct UpdateRow: View {
+	let updates: UpdateModel
+
+	var body: some View {
+		HStack {
+			switch updates.phase {
+			case .idle: Text("Verze \(AppModel.version)").foregroundStyle(.secondary)
+			case .checking: ProgressView().controlSize(.small); Text("Hledá se aktualizace…")
+			case .upToDate: Text("Verze \(AppModel.version) je nejnovější.").foregroundStyle(.secondary)
+			case let .available(rel): Text("Dostupná verze \(rel.version)")
+			case let .installing(v): ProgressView().controlSize(.small); Text("Instaluje se \(v)…")
+			case let .failed(msg): Text(msg).foregroundStyle(.orange)
+			}
+			Spacer()
+			if case let .available(rel) = updates.phase {
+				if let url = rel.url { Link("Co je nového", destination: url) }
+				if updates.installable { Button("Nainstalovat") { Task { await updates.install(rel) } } }
+			} else {
+				Button("Zkontrolovat") { Task { await updates.check() } }
+					.disabled(updates.phase == .checking || { if case .installing = updates.phase { true } else { false } }())
+			}
 		}
 	}
 }

@@ -30,6 +30,9 @@ private struct MenuContent: View {
 		Text(model.settings.name)
 		Text(model.statusText)
 		Text("Verze \(AppModel.version)")
+		if case let .available(rel) = model.updates.phase, model.updates.installable {
+			Button("Nainstalovat verzi \(rel.version)") { Task { await model.updates.install(rel) } }
+		}
 		Divider()
 		Button("Přehled…") {
 			NSApp.activate()
