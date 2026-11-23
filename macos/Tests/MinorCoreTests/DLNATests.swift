@@ -82,3 +82,30 @@ import Testing
 	await a.stop()
 	await b.stop()
 }
+
+@Test func webAccess() async throws {
+	let dir = FileManager.default.temporaryDirectory.appending(path: "minordlna-\(UUID())")
+	defer { try? FileManager.default.removeItem(at: dir) }
+	let routes = Routes(config: ServerConfig(settings: Settings(name: "Test"), version: "test", iconURL: nil),
+	                    store: try Store(url: dir.appending(path: "index.sqlite")), libraries: [])
+	try await Application(router: routes.router()).test(.live) { client in
+		try await client.execute(uri: "/api/state", method: .get) { #expect($0.status == .ok) } // the Mac itself
+		try await client.execute(uri: "/api/logout", method: .post) { #expect($0.status == .forbidden) } // no CSRF header
+	}
+	#expect(WebRoutes.isLocal(ip: "127.0.0.1", authority: "localhost:8200"))
+	#expect(WebRoutes.isLocal(ip: "::1", authority: "[::1]:8200"))
+	#expect(!WebRoutes.isLocal(ip: "127.0.0.1", authority: "evil.example:8200")) // DNS rebinding
+	#expect(!WebRoutes.isLocal(ip: "192.168.1.5", authority: "localhost:8200"))
+}
+
+@Test func webLogin() throws {
+	let access = WebAccess()
+	#expect(access.login(ip: "10.0.0.8", password: "") == .disabled)
+	access.configure(RemoteSettings(enabled: true, passwordHash: WebPassword.hash("tajne-heslo")))
+	guard case let .ok(token) = access.login(ip: "10.0.0.8", password: "tajne-heslo") else { Issue.record("login failed"); return }
+	#expect(access.valid(token) && !access.valid("x"))
+	for _ in 0..<WebAccess.maxFailures { #expect(access.login(ip: "10.0.0.9", password: "x") == .wrong) }
+	#expect(access.login(ip: "10.0.0.9", password: "tajne-heslo") == .locked)
+	access.configure(RemoteSettings(enabled: true, passwordHash: WebPassword.hash("jine-heslo")))
+	#expect(!access.valid(token)) // a new password logs everybody out
+}

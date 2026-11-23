@@ -42,6 +42,7 @@ private struct GeneralTab: View {
 					set: { if Settings.portRange.contains($0) { model.settings.port = $0 } }
 				), format: .number.grouping(.never))
 			}
+			WebSection()
 			Section("Aplikace") {
 				Toggle("Spouštět při přihlášení", isOn: $model.launchAtLogin)
 				Toggle("Instalovat aktualizace automaticky", isOn: $model.settings.autoUpdate)
@@ -193,5 +194,47 @@ private struct StorageTab: View {
 		}
 		.formStyle(.grouped)
 		.task { await model.refreshCacheSize() }
+	}
+}
+
+private struct WebSection: View {
+	@Environment(AppModel.self) private var model
+	@State private var password = ""
+	@State private var saving = false
+	@State private var saved = false
+
+	var body: some View {
+		@Bindable var model = model
+		Section {
+			Toggle("Povolit přístup z jiných zařízení", isOn: $model.settings.remote.enabled)
+			HStack {
+				SecureField(model.settings.remote.passwordHash.isEmpty ? "Heslo (aspoň \(WebPassword.minLength) znaků)" : "Nové heslo",
+				            text: $password)
+					.onChange(of: password) { saved = false }
+				Button(model.settings.remote.passwordHash.isEmpty ? "Nastavit heslo" : "Změnit heslo") {
+					saving = true
+					Task {
+						await model.setPassword(password)
+						password = ""
+						saving = false
+						saved = true
+					}
+				}
+				.disabled(saving || password.count < WebPassword.minLength)
+			}
+			if saved { Text("Heslo uloženo, přihlášená zařízení byla odhlášena.").foregroundStyle(.secondary) }
+			if model.settings.remote.enabled, model.settings.remote.passwordHash.isEmpty {
+				Text("Bez hesla zůstane přístup vypnutý.").foregroundStyle(.orange)
+			}
+			if model.settings.remote.active {
+				ForEach(model.remoteURLs, id: \.self) { url in
+					LabeledContent("Adresa") { Text(url).textSelection(.enabled) }
+				}
+			}
+		} header: {
+			Text("Webové rozhraní")
+		} footer: {
+			Text("Na tomto Macu se otevře bez hesla přes menu v liště. Jiná zařízení v místní síti se přihlásí heslem.")
+		}
 	}
 }

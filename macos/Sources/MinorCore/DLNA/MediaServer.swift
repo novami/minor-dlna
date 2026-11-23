@@ -17,6 +17,7 @@ public struct ServerConfig: Sendable, Equatable {
 	public var iconURL: URL?
 	public var databaseURL: URL
 	public var transcode: TranscodeSettings
+	public var remote: RemoteSettings
 
 	public init(settings: Settings, version: String, iconURL: URL?, databaseURL: URL = Store.defaultURL) {
 		name = settings.name.trimmingCharacters(in: .whitespaces).isEmpty ? "MinorDLNA" : settings.name
@@ -27,6 +28,7 @@ public struct ServerConfig: Sendable, Equatable {
 		self.iconURL = iconURL
 		self.databaseURL = databaseURL
 		transcode = settings.transcode
+		remote = settings.remote
 	}
 }
 
@@ -47,6 +49,8 @@ public actor MediaServer {
 	/// Kept open across restarts.
 	private var store: (url: URL, store: Store)?
 	private var running: (routes: Routes, scanner: LibraryScanner, libraries: [IndexedLibrary])?
+	/// Outlives restarts, so web users stay logged in.
+	private let web = WebAccess()
 
 	public init() { (states, continuation) = AsyncStream.makeStream() }
 
@@ -69,7 +73,8 @@ public actor MediaServer {
 			onState(.failed("Index knihovny nejde otevřít: \(error)"))
 			return
 		}
-		let routes = Routes(config: config, store: store, libraries: libraries)
+		web.configure(config.remote)
+		let routes = Routes(config: config, store: store, libraries: libraries, web: web)
 		let scanner = LibraryScanner(store: store, libraries: libraries) { _ in Task { await routes.cds.notifyAll() } }
 		let onState = { @Sendable (s: ServerState) in self.onState(s) }
 		let app = Application(
@@ -126,6 +131,9 @@ public actor MediaServer {
 			scanning: scanner.scanning, transcodes: routes.transcoder.current, clients: routes.profiles.list(),
 			ffmpeg: routes.transcoder.available, ffprobe: scanner.prober.available)
 	}
+
+	/// Applies web access settings without a restart; a new password logs everybody out.
+	public func setRemote(_ remote: RemoteSettings) { web.configure(remote) }
 
 	/// Applies hand-picked client profiles without a restart.
 	public func chooseProfiles(_ clients: [String: String]) {
@@ -189,8 +197,9 @@ struct Routes: Sendable {
 	let thumbnails = Thumbnails()
 	let transcoder: Transcoder
 	let profiles: ClientProfiles
+	let web: WebRoutes
 
-	init(config: ServerConfig, store: Store, libraries: [IndexedLibrary]) {
+	init(config: ServerConfig, store: Store, libraries: [IndexedLibrary], web access: WebAccess = WebAccess()) {
 		self.config = config
 		self.store = store
 		transcoder = Transcoder(hardware: config.transcode.hardware, maxSessions: config.transcode.maxSessions)
@@ -199,6 +208,12 @@ struct Routes: Sendable {
 		cds = Eventer { [("SystemUpdateID", String(store.updateID())), ("ContainerUpdateIDs", "")] }
 		cms = Eventer { [("SourceProtocolInfo", MediaFormat.sourceProtocolInfo), ("SinkProtocolInfo", ""), ("CurrentConnectionIDs", "0")] }
 		icons = config.iconURL.map(Self.renderIcons) ?? [:]
+		web = WebRoutes(access: access) { [config, store] in
+			let counts = store.counts()
+			return .init(name: config.name, version: config.version, libraries: libraries.map {
+				.init(name: $0.library.name, type: $0.type.rawValue, items: counts[$0.id]?.items ?? 0)
+			})
+		}
 	}
 
 	func router() -> Router<DLNAContext> {
@@ -231,6 +246,7 @@ struct Routes: Sendable {
 		r.head("/subs/:file") { req, ctx in try await subtitles(req, ctx) }
 		r.get("/thumb/:item/:size") { req, ctx in try await thumb(req, ctx) }
 		r.head("/thumb/:item/:size") { req, ctx in try await thumb(req, ctx) }
+		web.register(r)
 		return r
 	}
 

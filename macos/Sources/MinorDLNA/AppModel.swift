@@ -11,8 +11,13 @@ final class AppModel {
 			save()
 			if restartConfig(settings) != restartConfig(oldValue) {
 				scheduleRestart()
-			} else if settings.transcode.clients != oldValue.transcode.clients {
-				Task { [server, clients = settings.transcode.clients] in await server.chooseProfiles(clients) }
+			} else {
+				if settings.transcode.clients != oldValue.transcode.clients {
+					Task { [server, clients = settings.transcode.clients] in await server.chooseProfiles(clients) }
+				}
+				if settings.remote != oldValue.remote {
+					Task { [server, remote = settings.remote] in await server.setRemote(remote) }
+				}
 			}
 		}
 	}
@@ -52,10 +57,11 @@ final class AppModel {
 		ServerConfig(settings: s, version: Self.version, iconURL: Bundle.main.url(forResource: "AppIcon", withExtension: "icns"))
 	}
 
-	/// Hand-picked client profiles apply without a restart.
+	/// Hand-picked client profiles and web access apply without a restart.
 	private func restartConfig(_ s: Settings) -> ServerConfig {
 		var s = s
 		s.transcode.clients = [:]
+		s.remote = .init()
 		return serverConfig(s)
 	}
 
@@ -80,6 +86,20 @@ final class AppModel {
 		await refreshCacheSize()
 	}
 
+	/// Hashing takes a moment (PBKDF2), so it runs off the main thread.
+	func setPassword(_ password: String) async {
+		let hash = await Task.detached { WebPassword.hash(password) }.value
+		settings.remote.passwordHash = hash
+	}
+
+	var webURL: URL? { URL(string: "http://localhost:\(settings.port)/") }
+
+	/// Addresses other devices open the web interface at.
+	var remoteURLs: [String] {
+		guard case let .running(port, addresses) = serverState else { return [] }
+		return addresses.map { "http://\($0):\(port)/" }
+	}
+
 	/// nil returns the client to automatic detection.
 	func choose(profile: String?, for ip: String) {
 		settings.transcode.clients[ip] = profile
@@ -90,12 +110,12 @@ final class AppModel {
 	private func scheduleRestart(after delay: Duration = .milliseconds(800)) {
 		let previous = restartTask
 		previous?.cancel()
-		let config = serverConfig(settings)
-		restartTask = Task { [server] in
+		restartTask = Task { [weak self, server] in
 			await previous?.value
 			try? await Task.sleep(for: delay)
-			guard !Task.isCancelled else { return }
-			await server.start(config)
+			// Read now: web access and client profiles may have changed during the delay without a restart of their own.
+			guard !Task.isCancelled, let self else { return }
+			await server.start(serverConfig(settings))
 		}
 	}
 

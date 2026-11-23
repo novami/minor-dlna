@@ -35,6 +35,9 @@ private struct MenuContent: View {
 			NSApp.activate()
 			openWindow(id: "overview")
 		}
+		Button("Otevřít webové rozhraní") {
+			if let url = model.webURL { NSWorkspace.shared.open(url) }
+		}
 		Button("Nastavení…") {
 			// A menu bar app is never active on its own, so the window would open behind others.
 			NSApp.activate()

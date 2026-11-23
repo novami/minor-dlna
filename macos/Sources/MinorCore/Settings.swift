@@ -27,15 +27,17 @@ public struct Settings: Codable, Equatable, Sendable {
 	public var libraries: [Library]
 	public var autoUpdate: Bool
 	public var transcode: TranscodeSettings
+	public var remote: RemoteSettings
 
 	public init(name: String = Host.current().localizedName ?? "MinorDLNA", uuid: UUID = UUID(), port: Int = 8200,
-	            libraries: [Library] = [], autoUpdate: Bool = true, transcode: TranscodeSettings = .init()) {
+	            libraries: [Library] = [], autoUpdate: Bool = true, transcode: TranscodeSettings = .init(), remote: RemoteSettings = .init()) {
 		self.name = name
 		self.uuid = uuid
 		self.port = port
 		self.libraries = libraries
 		self.autoUpdate = autoUpdate
 		self.transcode = transcode
+		self.remote = remote
 	}
 
 	public init(from decoder: Decoder) throws {
@@ -47,6 +49,7 @@ public struct Settings: Codable, Equatable, Sendable {
 		libraries = try c.decodeIfPresent([Library].self, forKey: .libraries) ?? d.libraries
 		autoUpdate = try c.decodeIfPresent(Bool.self, forKey: .autoUpdate) ?? d.autoUpdate
 		transcode = try c.decodeIfPresent(TranscodeSettings.self, forKey: .transcode) ?? d.transcode
+		remote = try c.decodeIfPresent(RemoteSettings.self, forKey: .remote) ?? d.remote
 	}
 
 	public static let portRange = 1024...65535
