@@ -1,0 +1,45 @@
+included:
+  - macos/Sources
+  - macos/Tests
+excluded:
+  - macos/.build
+  - macos/Sources/MinorCore/Features/Web/WebPage.swift # embedded HTML/JS
+
+# The code style uses tabs, compact one-line members and short names.
+disabled_rules:
+  - trailing_comma
+  - identifier_name
+  - type_name
+  - opening_brace
+  - todo
+  - nesting
+  - large_tuple
+  - function_parameter_count
+  - blanket_disable_command
+  # NIO channels cast to the option/multicast protocols they are created with, static regex literals.
+  - force_cast
+  - force_try
+  # Lenient String(decoding:) is intended for ffmpeg/ffprobe output; "master" is the HLS term.
+  - optional_data_string_conversion
+  - inclusive_language
+  - multiple_closures_with_trailing_closure
+  - unused_closure_parameter
+opt_in_rules:
+  - empty_count
+line_length:
+  warning: 330
+  error: 500
+  ignores_comments: true
+  ignores_urls: true
+file_length:
+  warning: 600
+  error: 900
+function_body_length:
+  warning: 100
+  error: 150
+type_body_length:
+  warning: 500
+  error: 800
+cyclomatic_complexity:
+  warning: 30
+  error: 50

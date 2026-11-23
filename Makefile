@@ -1,12 +1,15 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
-.PHONY: build test app run install-app
+.PHONY: build test lint app run install-app
 
 build:
 	swift build --package-path macos
 
 test:
 	swift test --package-path macos
+
+lint:
+	swiftlint lint --strict
 
 app:
 	VERSION=$(VERSION) packaging/build-app.sh

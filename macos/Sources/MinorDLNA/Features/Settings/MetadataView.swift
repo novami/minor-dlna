@@ -75,7 +75,7 @@ private struct Poster: View {
 
 	var body: some View {
 		if let url, let img = NSImage(contentsOf: url) {
-			Image(nsImage: img).resizable().aspectRatio(contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: 3))
+			Image(nsImage: img).resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 3))
 		} else {
 			RoundedRectangle(cornerRadius: 3).fill(.quaternary)
 		}

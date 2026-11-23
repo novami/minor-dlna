@@ -1,6 +1,6 @@
 # Přispívání
 
-- Sestavení a testy: `make test` (`swift test --package-path macos`). Aplikace: `make app`.
+- Sestavení a testy: `make test` (`swift test --package-path macos`). Aplikace: `make app`. Styl hlídá `make lint` (SwiftLint, konfigurace `.swiftlint.yml`; CI běží se `--strict`).
 - Cílová platforma je výhradně macOS 15+ na Apple Silicon; Swift 6, bez dalších závislostí, pokud to není nutné.
 - Odsazení tabulátory (`.editorconfig`), komentáře stručně a jen tam, kde kód sám nestačí. Nové chování pokryjte malým testem v `macos/Tests/MinorCoreTests`.
 - Commit zprávy: malá písmena, minulý čas, jedna logická změna.

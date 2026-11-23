@@ -25,6 +25,7 @@ Ze zdrojů (Xcode Command Line Tools / Swift 6):
 ```bash
 make install-app   # sestaví dist/MinorDLNA.app a zkopíruje do ~/Applications
 make test          # swift test
+make lint          # swiftlint --strict (brew install swiftlint)
 ```
 
 Data: `~/Library/Application Support/cz.minordlna.app` (nastavení, index), cache `~/Library/Caches/cz.minordlna.app`. Logy: `log stream --predicate 'subsystem == "cz.minordlna.app"'`. Webové rozhraní: `http://localhost:8200/`.
@@ -32,12 +33,16 @@ Data: `~/Library/Application Support/cz.minordlna.app` (nastavení, index), cach
 ## Struktura
 
 ```text
-macos/Sources/MinorCore    jádro bez UI: DLNA/SSDP/SOAP, Store (SQLite), Library, Media, Transcode,
-                           Metadata, Renderer (Přehrát na TV), Web, Update
-macos/Sources/MinorDLNA    SwiftUI aplikace (menu lišty, okna, nastavení)
+macos/Sources/MinorCore    jádro bez UI
+  Core/                      AppPaths, Settings, Status
+  Services/                  DLNA (SSDP, SOAP, MediaServer), Store (SQLite)
+  Features/                  Library, Media, Metadata, Transcode, Renderer (Přehrát na TV), Web, Update
+macos/Sources/MinorDLNA    SwiftUI aplikace
+  App/                       vstupní bod, AppModel
+  Features/                  Library, Overview, Settings, TV, Updates
 macos/Tests                testy jádra (swift-testing)
 packaging                  build .app, podpis, ikona, Info.plist
-.github/workflows          CI a vydání
+.github/workflows          CI (lint, testy) a vydání
 ```
 
 Závislosti (jen Swift balíčky, nic dalšího): Hummingbird, SwiftNIO, swift-service-lifecycle, swift-log, swift-http-types. Zbytek jsou systémové frameworky.

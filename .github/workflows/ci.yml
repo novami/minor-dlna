@@ -3,9 +3,9 @@ name: CI
 on:
   push:
     branches: [main]
-    paths: ["macos/**", "packaging/**", ".github/workflows/ci.yml"]
+    paths: ["macos/**", "packaging/**", ".swiftlint.yml", ".github/workflows/ci.yml"]
   pull_request:
-    paths: ["macos/**", "packaging/**", ".github/workflows/ci.yml"]
+    paths: ["macos/**", "packaging/**", ".swiftlint.yml", ".github/workflows/ci.yml"]
 
 permissions:
   contents: read
@@ -15,6 +15,16 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - run: brew install swiftlint
+      - run: swiftlint lint --strict
+
   test:
     # macos-latest is Apple Silicon (arm64), the only architecture the app is built for.
     runs-on: macos-latest
