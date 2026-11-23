@@ -198,6 +198,8 @@ private struct RemoteBar: View {
 	let status: TVStatus
 	@State private var seeking: Double?
 	@State private var volume: Double?
+	/// Volume commands run one after another, so the TV ends at the last value.
+	@State private var volumeTask: Task<Void, Never>?
 
 	var body: some View {
 		let tv = model.tv!
@@ -222,14 +224,15 @@ private struct RemoteBar: View {
 						Task { await tv.command(.mute(!status.muted)) }
 					}
 					.labelStyle(.iconOnly)
-					Slider(value: Binding(get: { volume ?? Double(status.volume) }, set: { volume = $0 }), in: 0...100, step: 10) {
+					Slider(value: Binding(get: { volume ?? Double(status.volume) }, set: { setVolume($0) }), in: 0...100, step: 10) {
 						Text("Hlasitost")
 					} minimumValueLabel: {
 						EmptyView()
 					} maximumValueLabel: {
 						EmptyView()
 					} onEditingChanged: { editing in
-						if !editing, let v = volume { Task { await tv.command(.volume(Int(v))); volume = nil } }
+						// Keep showing the dragged value until the last command is through.
+						if !editing { let last = volumeTask; Task { await last?.value; volume = nil } }
 					}
 					.labelsHidden()
 					.frame(width: 150)
@@ -249,6 +252,18 @@ private struct RemoteBar: View {
 		}
 		.padding(10)
 		.background(.bar)
+	}
+
+	private func setVolume(_ v: Double) {
+		guard v != (volume ?? Double(status.volume)) else { return }
+		volume = v
+		let previous = volumeTask, tv = model.tv!
+		volumeTask = Task {
+			await previous?.value
+			// A newer step is already waiting: skip this one.
+			guard volume == nil || volume == v else { return }
+			await tv.command(.volume(Int(v)))
+		}
 	}
 
 	static func stateText(_ s: TVStatus) -> String {

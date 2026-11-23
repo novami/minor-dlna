@@ -204,7 +204,17 @@ enum WebPage {
 	$('r-play').addEventListener('click', () => cmd(tvs.status && tvs.status.state === 'PLAYING' ? 'pause' : 'play'));
 	$('r-stop').addEventListener('click', () => cmd('stop'));
 	$('r-mute').addEventListener('click', () => cmd('mute', tvs.status && tvs.status.muted ? 0 : 1));
-	$('r-vol').addEventListener('change', () => cmd('volume', +$('r-vol').value));
+	// Each step goes to the TV at once; one request at a time, the last value wins.
+	let volBusy = false, volWant = null;
+	async function sendVolume() {
+	  if (volBusy || volWant === null) return;
+	  volBusy = true;
+	  const v = volWant; volWant = null;
+	  await cmd('volume', v);
+	  volBusy = false;
+	  sendVolume();
+	}
+	$('r-vol').addEventListener('input', () => { volWant = +$('r-vol').value; sendVolume(); });
 	$('seek').addEventListener('input', () => { dragging = true; $('r-pos').textContent = time(+$('seek').value); });
 	$('seek').addEventListener('change', async () => { await cmd('seek', +$('seek').value); dragging = false; });
 	setInterval(() => { if (!$('app').hidden && !document.hidden) refreshTV(); }, 2000);
