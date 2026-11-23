@@ -76,7 +76,8 @@ actor HLSSessions {
 			transcoder.untrack(info.id)
 			held.withLock { $0 = nil }
 			let msg = String(decoding: stderr.withLock { $0 }, as: UTF8.self)
-			if pr.terminationReason == .exit, pr.terminationStatus != 0 {
+			if pr.terminationReason == .exit, pr.terminationStatus != 0, pr.terminationStatus != 255 {
+				// 255 is ffmpeg stopped by our own terminate() (player left or seeked), not a failure.
 				Log.server.error("hls \(title, privacy: .public) failed (\(pr.terminationStatus)): \(msg, privacy: .public)")
 			}
 		}
