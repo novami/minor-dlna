@@ -49,8 +49,17 @@ private struct GeneralTab: View {
 			WebSection()
 			Section("Aplikace") {
 				Toggle("Spouštět při přihlášení", isOn: $model.launchAtLogin)
-				Toggle("Instalovat aktualizace automaticky", isOn: $model.settings.autoUpdate)
+			}
+			Section {
+				Toggle("Automaticky kontrolovat aktualizace", isOn: $model.settings.autoCheck)
+				Toggle("Automaticky stahovat a instalovat", isOn: $model.settings.autoUpdate)
+					.disabled(!model.settings.autoCheck)
+				LabeledContent("Aktuální verze", value: AppModel.displayVersion)
 				UpdateRow(updates: model.updates)
+			} header: {
+				Text("Aktualizace")
+			} footer: {
+				Text("Instalují se jen podepsané verze z GitHub Releases a nikdy během převodu. Bez automatické instalace se nová verze jen nabídne.")
 			}
 		}
 		.formStyle(.grouped)
@@ -250,17 +259,17 @@ struct UpdateRow: View {
 	var body: some View {
 		HStack {
 			switch updates.phase {
-			case .idle: Text("Verze \(AppModel.displayVersion)").foregroundStyle(.secondary)
+			case .idle: Text("Dosud nezkontrolováno").foregroundStyle(.secondary)
 			case .checking: ProgressView().controlSize(.small); Text("Hledá se aktualizace…")
-			case .upToDate: Text("Verze \(AppModel.displayVersion) je nejnovější.").foregroundStyle(.secondary)
-			case let .available(rel): Text("Dostupná verze \(Version.display(rel.version))")
+			case .upToDate: Text("Máte nejnovější verzi.").foregroundStyle(.secondary)
+			case let .available(rel): Text("Dostupná verze: \(Version.display(rel.version))")
 			case let .installing(v): ProgressView().controlSize(.small); Text("Instaluje se \(v)…")
 			case let .failed(msg): Text(msg).foregroundStyle(.orange)
 			}
 			Spacer()
 			if case let .available(rel) = updates.phase {
 				if let url = rel.url { Link("Co je nového", destination: url) }
-				if updates.installable { Button("Nainstalovat") { Task { await updates.install(rel) } } }
+				if updates.installable { Button("Stáhnout a nainstalovat") { Task { await updates.install(rel) } } }
 			} else {
 				Button("Zkontrolovat") { Task { await updates.check() } }
 					.disabled(updates.phase == .checking || { if case .installing = updates.phase { true } else { false } }())

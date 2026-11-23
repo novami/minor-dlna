@@ -17,10 +17,13 @@ final class UpdateModel {
 
 	private(set) var phase = Phase.idle
 	@ObservationIgnored private let updater = Updater()
+	@ObservationIgnored private let checkEnabled: @MainActor () -> Bool
 	@ObservationIgnored private let auto: @MainActor () -> Bool
 	@ObservationIgnored private let busy: @MainActor () async -> Bool
 
 	static let checkEvery = Duration.seconds(24 * 3600)
+	/// While periodic checks are off, the setting is looked at again this often.
+	static let recheckSetting = Duration.seconds(60)
 	static let retryBusy = Duration.seconds(15 * 60)
 	/// After this long the new version counts as working and the previous one is deleted.
 	static let confirmAfter = Duration.seconds(60)
@@ -31,7 +34,8 @@ final class UpdateModel {
 	/// Release builds inside an app bundle; a development build only shows what is available.
 	var installable: Bool { app.pathExtension == "app" && Version.base(of: AppModel.version) != nil }
 
-	init(auto: @escaping @MainActor () -> Bool, busy: @escaping @MainActor () async -> Bool) {
+	init(check: @escaping @MainActor () -> Bool, auto: @escaping @MainActor () -> Bool, busy: @escaping @MainActor () async -> Bool) {
+		self.checkEnabled = check
 		self.auto = auto
 		self.busy = busy
 		Task { await self.confirmPending() }
@@ -51,6 +55,7 @@ final class UpdateModel {
 		try? await Task.sleep(for: .seconds(60))
 		while !Task.isCancelled {
 			var next = Self.checkEvery
+			guard checkEnabled() else { try? await Task.sleep(for: Self.recheckSetting); continue }
 			await check()
 			if case let .available(rel) = phase, auto() {
 				if await busy() {

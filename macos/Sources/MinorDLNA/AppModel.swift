@@ -58,7 +58,8 @@ final class AppModel {
 		}
 		scheduleRestart(after: .zero)
 		tv = TVModel(server: server)
-		updates = UpdateModel(auto: { [weak self] in self?.settings.autoUpdate ?? false },
+		updates = UpdateModel(check: { [weak self] in self?.settings.autoCheck ?? false },
+		                      auto: { [weak self] in self?.settings.autoUpdate ?? false },
 		                      busy: { [weak self] in await self?.server.status()?.transcodes.isEmpty == false })
 	}
 

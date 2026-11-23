@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds dist/MinorDLNA.app (universal Swift binary, signed).
+# Builds dist/MinorDLNA.app (Apple Silicon (arm64) Swift binary, signed).
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -13,8 +13,8 @@ if [ -d "$APP" ]; then
 fi
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
-swift build -c release --arch arm64 --arch x86_64 --package-path macos
-cp "$(swift build -c release --arch arm64 --arch x86_64 --package-path macos --show-bin-path)/MinorDLNA" "$APP/Contents/MacOS/MinorDLNA"
+swift build -c release --arch arm64 --package-path macos
+cp "$(swift build -c release --arch arm64 --package-path macos --show-bin-path)/MinorDLNA" "$APP/Contents/MacOS/MinorDLNA"
 # SwiftPM records the deployment target as the SDK version, so macOS draws the windows in the
 # compatibility look of that old SDK (grouped forms with broken outlines); record the real SDK.
 vtool -set-build-version macos 15.0 "$(xcrun --show-sdk-version)" -replace \

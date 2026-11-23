@@ -25,6 +25,9 @@ public struct Settings: Codable, Equatable, Sendable {
 	public var uuid: UUID
 	public var port: Int
 	public var libraries: [Library]
+	/// Look for new versions periodically.
+	public var autoCheck: Bool
+	/// Download and install a found version without asking (needs `autoCheck`).
 	public var autoUpdate: Bool
 	/// Czech titles, overviews and posters of movies and shows from Wikidata and Wikipedia.
 	public var metadata: Bool
@@ -34,12 +37,13 @@ public struct Settings: Codable, Equatable, Sendable {
 	public var autoNextEpisode: Bool
 
 	public init(name: String = Host.current().localizedName ?? "MinorDLNA", uuid: UUID = UUID(), port: Int = 8200,
-	            libraries: [Library] = [], autoUpdate: Bool = true, transcode: TranscodeSettings = .init(), remote: RemoteSettings = .init(), metadata: Bool = true,
+	            libraries: [Library] = [], autoCheck: Bool = true, autoUpdate: Bool = true, transcode: TranscodeSettings = .init(), remote: RemoteSettings = .init(), metadata: Bool = true,
 	            autoNextEpisode: Bool = false) {
 		self.name = name
 		self.uuid = uuid
 		self.port = port
 		self.libraries = libraries
+		self.autoCheck = autoCheck
 		self.autoUpdate = autoUpdate
 		self.metadata = metadata
 		self.transcode = transcode
@@ -54,6 +58,7 @@ public struct Settings: Codable, Equatable, Sendable {
 		uuid = try c.decodeIfPresent(UUID.self, forKey: .uuid) ?? d.uuid
 		port = try c.decodeIfPresent(Int.self, forKey: .port) ?? d.port
 		libraries = try c.decodeIfPresent([Library].self, forKey: .libraries) ?? d.libraries
+		autoCheck = try c.decodeIfPresent(Bool.self, forKey: .autoCheck) ?? d.autoCheck
 		autoUpdate = try c.decodeIfPresent(Bool.self, forKey: .autoUpdate) ?? d.autoUpdate
 		metadata = try c.decodeIfPresent(Bool.self, forKey: .metadata) ?? d.metadata
 		transcode = try c.decodeIfPresent(TranscodeSettings.self, forKey: .transcode) ?? d.transcode

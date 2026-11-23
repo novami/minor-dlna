@@ -16,10 +16,17 @@ import Testing
 	#expect(s.name == "TV")
 	#expect(s.port == 9000)
 	#expect(s.libraries.isEmpty)
+	#expect(s.autoCheck)
 	#expect(s.autoUpdate)
 }
 
 @Test func missingFileGivesDefaults() throws {
 	let s = try SettingsStore.load(from: URL(filePath: "/nonexistent/settings.json"))
 	#expect(s.port == 8200)
+}
+
+@Test func oldSettingsKeepAutoUpdateOff() throws {
+	let s = try JSONDecoder().decode(Settings.self, from: Data(#"{"autoUpdate":false}"#.utf8))
+	#expect(!s.autoUpdate)
+	#expect(s.autoCheck)
 }

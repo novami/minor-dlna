@@ -7,16 +7,25 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: macos-latest
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - id: swift
+        run: echo "version=$(swift --version 2>&1 | grep -o 'Swift version [0-9.]*' | tr ' ' '-')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: macos/.build
-          key: build-${{ runner.os }}-${{ hashFiles('macos/Package.resolved') }}-${{ github.sha }}
-          restore-keys: build-${{ runner.os }}-${{ hashFiles('macos/Package.resolved') }}-
+          key: build-${{ runner.os }}-${{ runner.arch }}-${{ steps.swift.outputs.version }}-${{ hashFiles('macos/Package.swift', 'macos/Package.resolved') }}-${{ github.sha }}
+          restore-keys: build-${{ runner.os }}-${{ runner.arch }}-${{ steps.swift.outputs.version }}-${{ hashFiles('macos/Package.swift', 'macos/Package.resolved') }}-
       - run: swift test --package-path macos
 
       - name: Build app
