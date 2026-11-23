@@ -1,3 +1,4 @@
+import AppKit
 import MinorCore
 import SwiftUI
 
@@ -224,18 +225,13 @@ private struct RemoteBar: View {
 						Task { await tv.command(.mute(!status.muted)) }
 					}
 					.labelStyle(.iconOnly)
-					Slider(value: Binding(get: { volume ?? Double(status.volume) }, set: { setVolume($0) }), in: 0...100, step: 10) {
-						Text("Hlasitost")
-					} minimumValueLabel: {
-						EmptyView()
-					} maximumValueLabel: {
-						EmptyView()
-					} onEditingChanged: { editing in
+					TickSlider(value: volume ?? Double(status.volume), range: 0...100, ticks: 11, onChange: setVolume) {
 						// Keep showing the dragged value until the last command is through.
-						if !editing { let last = volumeTask; Task { await last?.value; volume = nil } }
+						let last = volumeTask
+						Task { await last?.value; volume = nil }
 					}
-					.labelsHidden()
 					.frame(width: 150)
+					.help("Hlasitost")
 				}
 			}
 			if status.durationMs > 0, status.state != .stopped {
@@ -275,6 +271,48 @@ private struct RemoteBar: View {
 		case .paused: "Pozastaveno"
 		case .transitioning: "Načítá…"
 		case .stopped, .noMedia: "Zastaveno"
+		}
+	}
+}
+
+/// A system slider whose value snaps to tick marks drawn below the track, like the ones in System Settings.
+private struct TickSlider: NSViewRepresentable {
+	var value: Double
+	var range: ClosedRange<Double>
+	var ticks: Int
+	var onChange: (Double) -> Void
+	var onEnd: () -> Void
+
+	func makeNSView(context: Context) -> NSSlider {
+		let s = NSSlider(value: value, minValue: range.lowerBound, maxValue: range.upperBound,
+		                 target: context.coordinator, action: #selector(Coordinator.changed(_:)))
+		s.numberOfTickMarks = ticks
+		s.allowsTickMarkValuesOnly = true
+		s.tickMarkPosition = .below
+		s.isContinuous = true
+		s.setAccessibilityLabel("Hlasitost")
+		return s
+	}
+
+	func updateNSView(_ s: NSSlider, context: Context) {
+		context.coordinator.parent = self
+		if !context.coordinator.tracking, s.doubleValue != value { s.doubleValue = value }
+	}
+
+	func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+	@MainActor final class Coordinator: NSObject {
+		var parent: TickSlider
+		var tracking = false
+
+		init(_ parent: TickSlider) { self.parent = parent }
+
+		@objc func changed(_ s: NSSlider) {
+			parent.onChange(s.doubleValue)
+			// The last action of a drag comes with the mouse up; keys and clicks end at once.
+			let dragging = NSApp.currentEvent?.type == .leftMouseDragged || NSApp.currentEvent?.type == .leftMouseDown
+			tracking = dragging
+			if !dragging { parent.onEnd() }
 		}
 	}
 }
