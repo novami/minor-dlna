@@ -26,10 +26,24 @@ struct Profile: Sendable, Equatable {
 	private static let baseVideo: Set<String> = ["h264", "hevc", "mpeg2video", "mpeg4"]
 	private static let baseContainers: Set<String> = ["matroska", "mov", "mpegts", "avi", "mpeg", "flac", "mp3", "wav", "aac"]
 
-	/// In detection order.
+	/// In detection order: Roku first (Roku TVs carry another maker's name too), then makers, then shared platforms.
 	private static let brands = [
+		Brand(id: "roku", markers: ["roku"], containers: ["matroska", "mov", "mpegts", "flac", "mp3", "wav", "aac"],
+		      video: ["h264", "hevc", "vp9", "mpeg2video"], audio: baseAudio),
 		Brand(id: "lg", markers: ["lge", "webos", "lg-", "lg ", "lg electronics"], containers: baseContainers.union(["ogg"]),
 		      video: baseVideo.union(["vp9", "av1", "vc1"]), audio: baseAudio.union(["vorbis", "opus"])),
+		Brand(id: "samsung", markers: ["samsung", "sec_hhp", "tizen"], containers: baseContainers.union(["ogg", "asf"]),
+		      video: baseVideo.union(["vp9", "av1", "vc1", "wmv3"]), audio: baseAudio.union(["vorbis", "opus", "wmav2"])),
+		Brand(id: "sony", markers: ["bravia", "sony"], containers: baseContainers.union(["ogg"]),
+		      video: baseVideo.union(["vp9"]), audio: baseAudio.union(["vorbis", "opus"])),
+		Brand(id: "panasonic", markers: ["panasonic", "viera"], containers: baseContainers, video: baseVideo.union(["vp9"]), audio: baseAudio),
+		Brand(id: "hisense", markers: ["hisense", "vidaa"], containers: baseContainers, video: baseVideo.union(["vp9"]), audio: baseAudio),
+		Brand(id: "android", markers: ["android", "google", "tcl", "philips", "xiaomi", "mibox", "shield", "chromecast", "exoplayer", "dalvik"],
+		      containers: ["matroska", "mov", "mpegts", "mpeg", "flac", "mp3", "wav", "ogg", "aac"],
+		      video: ["h264", "hevc", "vp9", "mpeg2video"], audio: baseAudio.union(["vorbis", "opus"])),
+		Brand(id: "tv", markers: ["toshiba", "grundig", "sharp", "metz", "vestel", "jvc", "telefunken", "thomson", "finlux", "loewe", "dlnadoc"],
+		      containers: ["matroska", "mov", "mpegts", "mpeg", "mp3", "flac", "wav", "aac"],
+		      video: ["h264", "hevc", "mpeg2video"], audio: baseAudio),
 	]
 
 	static func named(_ id: String, dts: Bool) -> Profile? {

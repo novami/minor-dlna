@@ -384,9 +384,25 @@ struct Routes: Sendable {
 		case "GetSearchCapabilities": return ["SearchCaps": ""]
 		case "GetSortCapabilities": return ["SortCaps": "dc:title"]
 		case "GetSystemUpdateID": return ["Id": String(store.updateID())]
+		case "X_GetFeatureList": // Samsung asks where its basic view should start
+			return ["FeatureList": Self.featureList]
+		case "X_SetBookmark": // Samsung reports where the viewer stopped
+			guard let sec = Int(call.args["PosSecond"]?.trimmingCharacters(in: .whitespaces) ?? ""), sec >= 0,
+			      let id = call.args["ObjectID"], id.first == "I" else { throw .invalidArgs }
+			guard let path = catalog.media(id.dropFirst())?.path else { throw .noSuchObject }
+			try? store.savePosition(path: path, positionMs: sec * 1000, durationMs: 0)
+			return [:]
 		default: throw .invalidAction
 		}
 	}
+
+	private static let featureList = """
+		<?xml version="1.0" encoding="UTF-8"?><Features xmlns="urn:schemas-upnp-org:av:avs" \
+		xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="urn:schemas-upnp-org:av:avs http://www.upnp.org/schemas/av/avs.xsd">\
+		<Feature name="samsung.com_BASICVIEW" version="1">\
+		<container id="0" type="object.item.audioItem"/><container id="0" type="object.item.videoItem"/><container id="0" type="object.item.imageItem"/>\
+		</Feature></Features>
+		"""
 
 	private func cmsAction(_ call: SOAP.Call, client _: Client) throws(UPnPError) -> KeyValuePairs<String, String> {
 		switch call.action {

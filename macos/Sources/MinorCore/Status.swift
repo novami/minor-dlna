@@ -56,6 +56,13 @@ public struct ProfileOption: Sendable, Hashable, Identifiable {
 
 	public static let all = [
 		ProfileOption(id: "lg", label: "LG (webOS)"),
+		ProfileOption(id: "samsung", label: "Samsung (Tizen)"),
+		ProfileOption(id: "sony", label: "Sony Bravia"),
+		ProfileOption(id: "panasonic", label: "Panasonic Viera"),
+		ProfileOption(id: "hisense", label: "Hisense (VIDAA)"),
+		ProfileOption(id: "android", label: "Android TV / Google TV (TCL, Philips, Xiaomi…)"),
+		ProfileOption(id: "roku", label: "Roku TV (TCL, Hisense…)"),
+		ProfileOption(id: "tv", label: "Jiná televize (bezpečné formáty)"),
 		ProfileOption(id: Profile.generic.name, label: "Beze změny (počítač, přehrávač)"),
 	]
 

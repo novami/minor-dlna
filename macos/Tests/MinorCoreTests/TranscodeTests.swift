@@ -31,6 +31,14 @@ private func media(_ container: String, _ video: String?, _ audio: String?, kind
 	#expect(Plan.decide(.generic, media("matroska", "h264", "truehd")) == .direct)
 }
 
+@Test func detectsBrands() {
+	#expect(Profile.detectID("Roku/DVP-12.0 LG") == "roku")
+	#expect(Profile.detectID("SEC_HHP_[TV] Samsung Tizen") == "samsung")
+	#expect(Profile.detectID("X-AV-Client-Info: BRAVIA") == "sony")
+	#expect(Profile.detectID("VLC/3.0") == "generic")
+	#expect(Profile.named("samsung", dts: true)?.audioCodecs?.contains("dts") == true)
+}
+
 @Test func chosenProfileWins() {
 	let p = ClientProfiles(dts: true, chosen: ["10.0.0.2": "generic"])
 	#expect(p.profile(ip: "10.0.0.1", ident: "webOS TV").name == "lg")
