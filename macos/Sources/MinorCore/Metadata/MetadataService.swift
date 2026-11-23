@@ -27,7 +27,8 @@ public struct MetaEntry: Sendable, Equatable, Identifiable {
 final class MetadataService: Service, Sendable {
 	static let refreshAfter: TimeInterval = 30 * 24 * 3600
 	static let retryAfter: TimeInterval = 7 * 24 * 3600
-	static let passInterval = Duration.seconds(6 * 3600)
+	/// Also how soon posters purged from the caches come back.
+	static let passInterval = Duration.seconds(3600)
 	/// Between lookups, to be gentle to the free APIs.
 	static let pause = Duration.milliseconds(300)
 	/// In the caches: clearing the cache (or macOS purging it) only means downloading the posters again.
