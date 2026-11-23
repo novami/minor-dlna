@@ -25,6 +25,12 @@ public struct Version: Comparable, Sendable, CustomStringConvertible {
 		return nil
 	}
 
+	/// For people: "0.2.3" for any build of v0.2.3, without the commit; the build as it is when it is no version.
+	public static func display(_ build: String) -> String {
+		guard let v = base(of: build) else { return build }
+		return String(v.description.dropFirst())
+	}
+
 	public var description: String { "v" + numbers.map(String.init).joined(separator: ".") + (pre.isEmpty ? "" : "-" + pre) }
 
 	public static func < (a: Version, b: Version) -> Bool {

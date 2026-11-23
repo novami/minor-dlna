@@ -250,10 +250,10 @@ struct UpdateRow: View {
 	var body: some View {
 		HStack {
 			switch updates.phase {
-			case .idle: Text("Verze \(AppModel.version)").foregroundStyle(.secondary)
+			case .idle: Text("Verze \(AppModel.displayVersion)").foregroundStyle(.secondary)
 			case .checking: ProgressView().controlSize(.small); Text("Hledá se aktualizace…")
-			case .upToDate: Text("Verze \(AppModel.version) je nejnovější.").foregroundStyle(.secondary)
-			case let .available(rel): Text("Dostupná verze \(rel.version)")
+			case .upToDate: Text("Verze \(AppModel.displayVersion) je nejnovější.").foregroundStyle(.secondary)
+			case let .available(rel): Text("Dostupná verze \(Version.display(rel.version))")
 			case let .installing(v): ProgressView().controlSize(.small); Text("Instaluje se \(v)…")
 			case let .failed(msg): Text(msg).foregroundStyle(.orange)
 			}

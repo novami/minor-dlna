@@ -34,6 +34,7 @@ final class AppModel {
 	@ObservationIgnored private var restartTask: Task<Void, Never>?
 
 	static let version = Bundle.main.object(forInfoDictionaryKey: "MinorDLNABuild") as? String ?? "dev"
+	static let displayVersion = Version.display(version)
 
 	/// Last error shown in the settings window.
 	var error: String?

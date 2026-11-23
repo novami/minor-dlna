@@ -287,7 +287,7 @@ struct Routes: Sendable {
 		icons = config.iconURL.map(Self.renderIcons) ?? [:]
 		web = WebRoutes(access: access, catalog: catalog, tv: tv) { [config, store] in
 			let counts = store.counts()
-			return .init(name: config.name, version: config.version, libraries: libraries.map {
+			return .init(name: config.name, version: Version.display(config.version), libraries: libraries.map {
 				.init(name: $0.library.name, type: $0.type.rawValue, items: counts[$0.id]?.items ?? 0)
 			})
 		}

@@ -25,3 +25,9 @@ import Testing
 	let mine = try key.signature(for: sums).base64EncodedString()
 	#expect(Updater.verify(sums, signature: Data(mine.utf8), publicKey: key.publicKey.rawRepresentation.base64EncodedString()))
 }
+
+@Test func displayVersion() {
+	#expect(Version.display("v0.2.3-40-g29ecd9d-dirty") == "0.2.3")
+	#expect(Version.display("v1.0.0-rc.1") == "1.0.0-rc.1")
+	#expect(Version.display("dev") == "dev")
+}

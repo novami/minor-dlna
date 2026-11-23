@@ -10,7 +10,6 @@ struct OverviewView: View {
 			Section {
 				LabeledContent("Název na televizi", value: model.settings.name)
 				LabeledContent("Stav") { Text(model.statusText).textSelection(.enabled) }
-				LabeledContent("Verze", value: AppModel.version)
 			}
 			if let st = model.status, !st.ffmpeg || !st.ffprobe {
 				Section {
@@ -39,7 +38,7 @@ struct OverviewView: View {
 			}
 		}
 		.formStyle(.grouped)
-		.frame(minWidth: 480, minHeight: 420)
+		.navigationTitle("Přehled")
 		.task { await model.watchStatus() }
 	}
 }

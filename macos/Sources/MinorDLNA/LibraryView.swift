@@ -2,41 +2,65 @@ import AppKit
 import MinorCore
 import SwiftUI
 
-/// Browses the libraries and plays items on a TV.
-struct LibraryView: View {
+/// The main window: the overview and each library in the sidebar, search, the TV to play on and its remote control.
+struct MainView: View {
+	enum Page: Hashable, Codable {
+		case overview
+		case library(String)
+	}
+
 	@Environment(AppModel.self) private var model
-	@State private var path: [String] = []
+	@SceneStorage("page") private var stored: String = "overview"
+	@State private var libraries: [BrowseEntry] = []
 	@State private var query = ""
+
+	private var page: Binding<Page?> {
+		Binding(get: { stored == "overview" ? .overview : .library(stored) },
+		        set: { stored = if case let .library(id) = $0 { id } else { "overview" } })
+	}
 
 	var body: some View {
 		let tv = model.tv!
-		NavigationStack(path: $path) {
-			Group {
-				if query.trimmingCharacters(in: .whitespaces).isEmpty {
-					ContainerList(id: "0")
-				} else {
-					SearchResults(query: query)
+		NavigationSplitView {
+			List(selection: page) {
+				Label("Přehled", systemImage: "gauge.with.dots.needle.33percent").tag(Page.overview)
+				Section("Knihovny") {
+					ForEach(libraries) { Label($0.title, systemImage: "folder").tag(Page.library($0.id)) }
 				}
 			}
-			.navigationDestination(for: String.self) { ContainerList(id: $0) }
+			.navigationSplitViewColumnWidth(min: 160, ideal: 190)
+		} detail: {
+			Group {
+				if !query.trimmingCharacters(in: .whitespaces).isEmpty {
+					NavigationStack { SearchResults(query: query).navigationDestination(for: String.self) { ContainerList(id: $0) } }
+				} else if case let .library(id) = page.wrappedValue {
+					NavigationStack { ContainerList(id: id).navigationDestination(for: String.self) { ContainerList(id: $0) } }
+						.id(id) // back to the top when another library is picked
+				} else {
+					OverviewView()
+				}
+			}
+			.safeAreaInset(edge: .bottom, spacing: 0) {
+				VStack(spacing: 0) {
+					if let err = tv.error {
+						HStack {
+							Label(err, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+							Spacer()
+							Button("Zavřít") { tv.error = nil }.buttonStyle(.link)
+						}
+						.padding(8)
+						.background(.bar)
+					}
+					if let st = tv.status { RemoteBar(status: st) }
+				}
+			}
 		}
 		.searchable(text: $query, placement: .toolbar, prompt: "Hledat filmy, seriály, hudbu")
 		.toolbar { ToolbarItem(placement: .primaryAction) { TVPicker() } }
-		.safeAreaInset(edge: .bottom, spacing: 0) {
-			VStack(spacing: 0) {
-				if let err = tv.error {
-					HStack {
-						Label(err, systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-						Spacer()
-						Button("Zavřít") { tv.error = nil }.buttonStyle(.link)
-					}
-					.padding(8)
-					.background(.bar)
-				}
-				if let st = tv.status { RemoteBar(status: st) }
-			}
+		.frame(minWidth: 720, minHeight: 460)
+		.task(id: "\(model.serverState)#\(model.settings.libraries.map(\.name))") {
+			libraries = await model.browse("0")?.entries ?? []
 		}
-		.frame(minWidth: 560, minHeight: 420)
 	}
 }
 
@@ -62,7 +86,7 @@ private struct ContainerList: View {
 				ProgressView()
 			}
 		}
-		.navigationTitle(id == "0" ? "Knihovna" : page?.title ?? "")
+		.navigationTitle(page?.title ?? "")
 		.task(id: "\(id)#\(model.tv.revision)#\(model.serverState)") {
 			page = await model.browse(id)
 			missing = page == nil

@@ -36,6 +36,7 @@ enum WebPage {
 	.ticks input { width: 100%; margin: 0; }
 	.dots { display: flex; justify-content: space-between; padding: 0 7px; }
 	.dots i { width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: .45; }
+	footer { text-align: center; font-size: .75rem; margin-top: 2rem; }
 	.error { color: #d33; }
 	[hidden] { display: none !important; }
 	</style>
@@ -59,7 +60,7 @@ enum WebPage {
 	  <p><input id="q" type="search" placeholder="Hledat filmy, seriály, hudbu"></p>
 	  <div id="crumbs"></div>
 	  <ul id="list"></ul>
-	  <p class="muted">Verze <span id="version"></span></p>
+	  <footer class="muted">Verze <span id="version"></span></footer>
 	</main>
 	<p id="error" class="error"></p>
 	<div id="remote" hidden><div>

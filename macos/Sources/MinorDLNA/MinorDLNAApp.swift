@@ -10,14 +10,10 @@ struct MinorDLNAApp: App {
 		MenuBarExtra("MinorDLNA", systemImage: "play.tv") {
 			MenuContent().environment(model)
 		}
-		Window("Knihovna", id: "library") {
-			LibraryView().environment(model)
+		Window("MinorDLNA", id: "main") {
+			MainView().environment(model)
 		}
-		.defaultSize(width: 720, height: 620)
-		Window("Přehled", id: "overview") {
-			OverviewView().environment(model)
-		}
-		.defaultSize(width: 520, height: 560)
+		.defaultSize(width: 860, height: 640)
 		Settings {
 			SettingsView().environment(model)
 		}
@@ -33,9 +29,8 @@ private struct MenuContent: View {
 		@Bindable var model = model
 		Text(model.settings.name)
 		Text(model.statusText)
-		Text("Verze \(AppModel.version)")
 		if case let .available(rel) = model.updates.phase, model.updates.installable {
-			Button("Nainstalovat verzi \(rel.version)") { Task { await model.updates.install(rel) } }
+			Button("Nainstalovat verzi \(Version.display(rel.version))") { Task { await model.updates.install(rel) } }
 		}
 		if let st = model.tv.status, st.state != .stopped {
 			Divider()
@@ -44,13 +39,9 @@ private struct MenuContent: View {
 			Button("Zastavit") { Task { await model.tv.command(.stop) } }
 		}
 		Divider()
-		Button("Knihovna…") {
+		Button("Otevřít MinorDLNA…") {
 			NSApp.activate()
-			openWindow(id: "library")
-		}
-		Button("Přehled…") {
-			NSApp.activate()
-			openWindow(id: "overview")
+			openWindow(id: "main")
 		}
 		Button("Otevřít webové rozhraní") {
 			if let url = model.webURL { NSWorkspace.shared.open(url) }
