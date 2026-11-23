@@ -1,6 +1,6 @@
 # MinorDLNA
 
-DLNA/UPnP mediální server v Go pro sdílení videí, fotek a hudby z Macu do TV (primárně LG webOS).
+DLNA/UPnP mediální server ve Swiftu pro sdílení videí, fotek a hudby z Macu do TV (primárně LG webOS).
 
 Stav: fáze 4 – index v SQLite, pohledy Filmy (A–Z, naposledy přidané, podle roku), Seriály (seriál → série → díl), Složky, přímé přehrávání se seekem. Fotky podle data s náhledy (vč. HEIC), hudba podle interpretů, alb a žánrů s obaly. Formáty, které LG neumí (např. TrueHD, DTS, WMV), server převádí přes ffmpeg s hardwarovou akcelerací; externí titulky `.srt` (i v CP1250). Překódování, délku, rozlišení a náhledy videí zajišťuje ffmpeg (`brew install ffmpeg`). Návrh: [docs/NAVRH.md](docs/NAVRH.md).
 
@@ -24,7 +24,7 @@ Pro vývoj: `make run` (server v terminálu, logy na stderr).
 
 ## Vydání nové verze
 
-Tag `vX.Y.Z` spustí `.github/workflows/release.yml`: sestaví aplikaci, podepíše `checksums.txt` a vytvoří GitHub Release. Workflow potřebuje secret `MINORDLNA_SIGNING_KEY` (obsah souboru se soukromým klíčem z `go run ./tools/release keygen`) a `MINORDLNA_CODESIGN_P12` (base64 certifikátu z `packaging/codesign-keygen.sh`). Aplikace podepsaná stále stejným certifikátem si po aktualizaci ponechá povolení Místní síť; lokální `make app` ho bere z `~/.config/minordlna/codesign.p12`.
+Tag `vX.Y.Z` spustí `.github/workflows/release.yml`: sestaví aplikaci, podepíše `checksums.txt` a vytvoří GitHub Release. Workflow potřebuje secret `MINORDLNA_SIGNING_KEY` (base64 32bajtového seedu Ed25519 klíče, veřejný klíč je v aplikaci) a `MINORDLNA_CODESIGN_P12` (base64 certifikátu z `packaging/codesign-keygen.sh`). Aplikace podepsaná stále stejným certifikátem si po aktualizaci ponechá povolení Místní síť; lokální `make app` ho bere z `~/.config/minordlna/codesign.p12`.
 
 ## Licence
 

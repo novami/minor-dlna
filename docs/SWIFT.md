@@ -1,6 +1,6 @@
 # Přechod na Swift
 
-Rozhodnutí 2026-11-22: MinorDLNA vznikne znovu jako nová aplikace čistě ve Swiftu. Nemá vazbu na Go verzi: nepřebírá data, config ani instalace a uživatelé si ji nastaví znovu. Go verze se nevydává ani neudržuje. Go kód zůstane v repu jen jako reference chování (LG, iOS, HDR) a smaže se v poslední fázi.
+Rozhodnutí 2026-11-22: MinorDLNA vznikne znovu jako nová aplikace čistě ve Swiftu. Nemá vazbu na Go verzi: nepřebírá data, config ani instalace a uživatelé si ji nastaví znovu. Go verze se nevydává ani neudržuje. Go kód byl smazán v S9 (poslední verze v gitu před commitem 6481d05).
 
 Nativní SwiftUI pro Mac, webové UI pro přehrávač a vzdálený přístup. Stejné repo, minimum macOS 15, Swift 6 (strict concurrency).
 
