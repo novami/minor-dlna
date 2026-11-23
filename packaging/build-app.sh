@@ -15,6 +15,10 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 swift build -c release --arch arm64 --arch x86_64 --package-path macos
 cp "$(swift build -c release --arch arm64 --arch x86_64 --package-path macos --show-bin-path)/MinorDLNA" "$APP/Contents/MacOS/MinorDLNA"
+# SwiftPM records the deployment target as the SDK version, so macOS draws the windows in the
+# compatibility look of that old SDK (grouped forms with broken outlines); record the real SDK.
+vtool -set-build-version macos 15.0 "$(xcrun --show-sdk-version)" -replace \
+	-output "$APP/Contents/MacOS/MinorDLNA" "$APP/Contents/MacOS/MinorDLNA"
 
 sed "s/__VERSION__/$PLIST_VERSION/g; s/__BUILD__/$VERSION/g" packaging/Info.plist > "$APP/Contents/Info.plist"
 cp packaging/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
