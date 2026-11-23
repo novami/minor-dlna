@@ -35,9 +35,10 @@ enum DIDL {
 					if let t = o.track, t > 0 { b += "<upnp:originalTrackNumber>\(t)</upnp:originalTrackNumber>" }
 				}
 				if let g = o.genre { b += "<upnp:genre>\(g.xmlEscaped)</upnp:genre>" }
-				if f.kind == .video, o.positionMs > 0 {
-					// UPnP AV bookmark; whether LG resumes from it is unverified.
-					b += "<upnp:lastPlaybackPosition>\(duration(o.positionMs))</upnp:lastPlaybackPosition>"
+				if f.kind == .video, o.positionMs > 0 || o.watched {
+					// UPnP AV bookmark and play count; whether LG draws a progress bar from them is unverified.
+					if o.positionMs > 0 { b += "<upnp:lastPlaybackPosition>\(duration(o.positionMs))</upnp:lastPlaybackPosition>" }
+					b += "<upnp:playbackCount>\(o.watched ? 1 : 0)</upnp:playbackCount>"
 				}
 				b += details(o) + art(o, baseURL)
 				let subs = o.subtitle != nil ? Int64(o.id.dropFirst()).map { baseURL + Subtitles.path(item: $0) } : nil
