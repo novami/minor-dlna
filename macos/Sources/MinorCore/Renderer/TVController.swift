@@ -344,6 +344,13 @@ actor TVController: Service {
 		}
 	}
 
+	private func refreshPosition(_ s: Session) async {
+		guard let avt = s.dev.avTransport, s.started,
+		      let pi = try? await UPnPClient.call(avt, UPnPClient.avTransport, "GetPositionInfo", ["InstanceID": "0"]),
+		      let pos = UPnPClient.parseTime(pi["RelTime"] ?? ""), pos > 0 else { return }
+		s.st.positionMs = pos
+	}
+
 	private func seek(_ s: Session, _ ms: Int) async throws {
 		guard let avt = s.dev.avTransport else { return }
 		let target = UPnPClient.formatTime(ms)
@@ -359,6 +366,12 @@ actor TVController: Service {
 	/// Controls the running session.
 	func command(_ c: TVCommand) async throws {
 		guard let s = session else { throw TVError("Na televizi nic nehraje.") }
+		// Stop also cancels waking or connecting to the TV.
+		if case .stop = c, s.st.state == .waking || s.st.state == .starting {
+			end(s, nil)
+			if let avt = s.dev.avTransport { _ = try? await UPnPClient.call(avt, UPnPClient.avTransport, "Stop", ["InstanceID": "0"]) }
+			return
+		}
 		guard let avt = s.dev.avTransport else { throw TVError("Televize se ještě připojuje.") }
 		do {
 			switch c {
@@ -367,6 +380,8 @@ actor TVController: Service {
 			case .play:
 				_ = try await UPnPClient.call(avt, UPnPClient.avTransport, "Play", ["InstanceID": "0", "Speed": "1"])
 			case .stop:
+				// The last poll may be two seconds old: resume exactly where it stops.
+				await refreshPosition(s)
 				save(s)
 				_ = try await UPnPClient.call(avt, UPnPClient.avTransport, "Stop", ["InstanceID": "0"])
 				end(s, nil)

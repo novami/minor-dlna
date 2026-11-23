@@ -119,7 +119,8 @@ enum WebPage {
 	  if (e.kind === 'video' || e.kind === 'audio') {
 	    const resume = e.positionMs > 0 && !e.watched;
 	    const b = el('button', resume ? '▶ Pokračovat' : '▶ Přehrát');
-	    b.addEventListener('click', () => play(e, false));
+	    b.dataset.id = e.id; b.dataset.label = b.textContent;
+	    b.addEventListener('click', () => playingID() === e.id ? cmd('stop') : play(e, false));
 	    li.append(b);
 	    if (resume) { const s = el('button', 'Od začátku', 'plain'); s.addEventListener('click', () => play(e, true)); li.append(s); }
 	  }
@@ -132,7 +133,7 @@ enum WebPage {
 	    const i = stack.findIndex(s => s.id === id);
 	    stack = i >= 0 ? stack.slice(0, i + 1) : [...stack, { id, title: id === '0' ? 'Knihovna' : p.title }];
 	    crumbs();
-	    $('list').replaceChildren(...(p.entries.length ? p.entries.map(row) : [el('li', 'Prázdné.', 'muted')]));
+	    $('list').replaceChildren(...(p.entries.length ? p.entries.map(row) : [el('li', 'Prázdné.', 'muted')])); playButtons();
 	    showError();
 	  } catch (e) { if (e.message !== 'login') showError(e.message); }
 	}
@@ -151,11 +152,19 @@ enum WebPage {
 	    try {
 	      const r = await api('/api/search?q=' + encodeURIComponent(q));
 	      $('crumbs').replaceChildren(el('b', 'Hledání'));
-	      $('list').replaceChildren(...(r.entries.length ? r.entries.map(row) : [el('li', 'Nic nenalezeno.', 'muted')]));
+	      $('list').replaceChildren(...(r.entries.length ? r.entries.map(row) : [el('li', 'Nic nenalezeno.', 'muted')])); playButtons();
 	    } catch (e) { if (e.message !== 'login') showError(e.message); }
 	  }, 250);
 	});
 
+	function playingID() {
+	  const s = tvs.status;
+	  return s && s.state !== 'STOPPED' && s.state !== 'NO_MEDIA_PRESENT' ? s.itemID : null;
+	}
+	function playButtons() {
+	  const id = playingID();
+	  document.querySelectorAll('#list button[data-id]').forEach(b => { b.textContent = b.dataset.id === id ? '⏹ Zastavit' : b.dataset.label; });
+	}
 	function selectedTV() {
 	  const saved = localStorage.getItem('tv');
 	  return tvs.devices.find(d => d.udn === saved) || tvs.devices.find(d => d.online);
@@ -167,6 +176,7 @@ enum WebPage {
 	  sel.disabled = !tvs.devices.length;
 	  if (cur) sel.value = cur.udn;
 	  $('tv-wake').hidden = !(cur && !cur.online && cur.canWake);
+	  playButtons();
 	  const s = tvs.status;
 	  $('remote').hidden = !s || $('app').hidden;
 	  if (!s) return;

@@ -143,10 +143,15 @@ private struct EntryRow: View {
 			}
 			Spacer()
 			if entry.playable {
-				let resume = entry.positionMs > 0 && !entry.watched
-				Button(resume ? "Pokračovat" : "Přehrát", systemImage: "play.fill") { Task { await tv.play(entry) } }
-					.disabled(tv.selected == nil)
-					.help(tv.selected.map { "Přehrát na \($0.name)" } ?? "Nejdřív vyberte televizi")
+				if let st = tv.status, st.itemID == entry.id, st.state != .stopped, st.state != .noMedia {
+					Button("Zastavit", systemImage: "stop.fill") { Task { await tv.command(.stop) } }
+						.help("Zastavit přehrávání na \(st.tv)")
+				} else {
+					let resume = entry.positionMs > 0 && !entry.watched
+					Button(resume ? "Pokračovat" : "Přehrát", systemImage: "play.fill") { Task { await tv.play(entry) } }
+						.disabled(tv.selected == nil)
+						.help(tv.selected.map { "Přehrát na \($0.name)" } ?? "Nejdřív vyberte televizi")
+				}
 			}
 		}
 		.contextMenu {

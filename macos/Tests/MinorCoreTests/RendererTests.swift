@@ -104,8 +104,9 @@ import Testing
 
 		tv.withLock { $0.pos = "0:10:00"; $0.state = "PLAYING" }
 		try await until("second playing") { await c.status()?.positionMs == 600_000 }
+		tv.withLock { $0.pos = "0:10:01" } // not polled yet: stop asks the TV itself
 		try await c.command(.stop)
 		#expect(await c.status()?.state == .stopped)
-		#expect(try cat.metadata(eps[1].id).positionMs == 600_000)
+		#expect(try cat.metadata(eps[1].id).positionMs == 601_000)
 	}
 }
