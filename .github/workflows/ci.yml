@@ -10,5 +10,10 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: macos/.build
+          key: build-${{ runner.os }}-${{ hashFiles('macos/Package.resolved') }}-${{ github.sha }}
+          restore-keys: build-${{ runner.os }}-${{ hashFiles('macos/Package.resolved') }}-
       - run: swift test --package-path macos
       - run: swift build -c release --package-path macos
