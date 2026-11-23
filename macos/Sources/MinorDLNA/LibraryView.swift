@@ -222,10 +222,17 @@ private struct RemoteBar: View {
 						Task { await tv.command(.mute(!status.muted)) }
 					}
 					.labelStyle(.iconOnly)
-					Slider(value: Binding(get: { volume ?? Double(status.volume) }, set: { volume = $0 }), in: 0...100) { editing in
+					Slider(value: Binding(get: { volume ?? Double(status.volume) }, set: { volume = $0 }), in: 0...100, step: 10) {
+						Text("Hlasitost")
+					} minimumValueLabel: {
+						EmptyView()
+					} maximumValueLabel: {
+						EmptyView()
+					} onEditingChanged: { editing in
 						if !editing, let v = volume { Task { await tv.command(.volume(Int(v))); volume = nil } }
 					}
-					.frame(width: 90)
+					.labelsHidden()
+					.frame(width: 150)
 				}
 			}
 			if status.durationMs > 0, status.state != .stopped {

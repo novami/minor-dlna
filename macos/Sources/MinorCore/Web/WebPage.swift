@@ -61,7 +61,8 @@ enum WebPage {
 	<div id="remote" hidden><div>
 	  <div class="bar"><div class="grow"><div id="r-title" class="title"></div><div id="r-state" class="sub"></div></div>
 	    <button id="r-play" class="plain">⏯</button><button id="r-stop" class="plain">⏹</button>
-	    <button id="r-mute" class="plain" hidden>🔇</button><input id="r-vol" type="range" min="0" max="100" hidden style="width:6rem">
+	    <button id="r-mute" class="plain" hidden>🔇</button><input id="r-vol" type="range" min="0" max="100" step="10" list="vol-ticks" hidden style="width:9rem">
+	    <datalist id="vol-ticks"><option value="0"><option value="10"><option value="20"><option value="30"><option value="40"><option value="50"><option value="60"><option value="70"><option value="80"><option value="90"><option value="100"></datalist>
 	  </div>
 	  <div class="bar sub"><span id="r-pos"></span><input id="seek" class="grow" type="range" min="0" value="0"><span id="r-dur"></span></div>
 	</div></div>
