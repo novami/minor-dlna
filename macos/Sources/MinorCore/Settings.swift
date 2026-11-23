@@ -26,16 +26,19 @@ public struct Settings: Codable, Equatable, Sendable {
 	public var port: Int
 	public var libraries: [Library]
 	public var autoUpdate: Bool
+	/// Czech titles, overviews and posters of movies and shows from Wikidata and Wikipedia.
+	public var metadata: Bool
 	public var transcode: TranscodeSettings
 	public var remote: RemoteSettings
 
 	public init(name: String = Host.current().localizedName ?? "MinorDLNA", uuid: UUID = UUID(), port: Int = 8200,
-	            libraries: [Library] = [], autoUpdate: Bool = true, transcode: TranscodeSettings = .init(), remote: RemoteSettings = .init()) {
+	            libraries: [Library] = [], autoUpdate: Bool = true, transcode: TranscodeSettings = .init(), remote: RemoteSettings = .init(), metadata: Bool = true) {
 		self.name = name
 		self.uuid = uuid
 		self.port = port
 		self.libraries = libraries
 		self.autoUpdate = autoUpdate
+		self.metadata = metadata
 		self.transcode = transcode
 		self.remote = remote
 	}
@@ -48,6 +51,7 @@ public struct Settings: Codable, Equatable, Sendable {
 		port = try c.decodeIfPresent(Int.self, forKey: .port) ?? d.port
 		libraries = try c.decodeIfPresent([Library].self, forKey: .libraries) ?? d.libraries
 		autoUpdate = try c.decodeIfPresent(Bool.self, forKey: .autoUpdate) ?? d.autoUpdate
+		metadata = try c.decodeIfPresent(Bool.self, forKey: .metadata) ?? d.metadata
 		transcode = try c.decodeIfPresent(TranscodeSettings.self, forKey: .transcode) ?? d.transcode
 		remote = try c.decodeIfPresent(RemoteSettings.self, forKey: .remote) ?? d.remote
 	}

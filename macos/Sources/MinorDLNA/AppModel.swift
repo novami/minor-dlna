@@ -103,6 +103,27 @@ final class AppModel {
 		return addresses.map { "http://\($0):\(port)/" }
 	}
 
+	// MARK: Metadata
+
+	private(set) var metaEntries: [MetaEntry] = []
+
+	func refreshMetadata() async { metaEntries = await server.metadataEntries() }
+
+	func searchMetadata(_ id: Int64, _ query: String) async throws -> [MetaCandidate] {
+		try await server.metadataSearch(id, query)
+	}
+
+	/// nil: no metadata for the title.
+	func setMetadata(_ id: Int64, wikidata: String?) async throws {
+		try await server.metadataSet(id, wikidata: wikidata)
+		await refreshMetadata()
+	}
+
+	func rematchMetadata(_ id: Int64) async {
+		do { try await server.metadataRematch(id) } catch { self.error = "Nešlo znovu vyhledat: \(error.localizedDescription)" }
+		await refreshMetadata()
+	}
+
 	/// nil returns the client to automatic detection.
 	func choose(profile: String?, for ip: String) {
 		settings.transcode.clients[ip] = profile

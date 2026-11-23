@@ -31,6 +31,11 @@ struct CatalogObject: Sendable, Equatable {
 	var channels: Int?
 	/// Item whose thumbnail is the album art (/thumb/<id>/tn.jpg).
 	var artItem: Int64?
+	/// Matched movie or show whose poster is the album art (/poster/<id>/tn.jpg); wins over artItem.
+	var poster: Int64?
+	var overview: String?
+	var director: String?
+	var cast: [String] = []
 }
 
 /// Browses the index. Object IDs never contain paths:
@@ -133,7 +138,9 @@ struct LibraryCatalog: Sendable {
 				throw UPnPError.noSuchObject
 			}
 			if let season { return container(id, "S\(show)", Self.seasonTitle(season), total) }
-			return container(id, "L\(lib)/shows", name, total)
+			return try db.one("""
+				SELECT s.id, COALESCE(ms.title, s.name), ?, ms.id, ms.poster, ms.overview, ms.genres FROM show s \(Self.showMeta) WHERE s.id = ?
+				""", total ?? 0, show) { showContainer($0, parent: "L\(lib)/shows") } ?? container(id, "L\(lib)/shows", name, total)
 		case "A", "B", "G":
 			return try musicMetadata(id, total)
 		case "I":
@@ -176,7 +183,7 @@ struct LibraryCatalog: Sendable {
 		case "folders":
 			return try folders(lib, id, start, count)
 		case "all":
-			return try itemPage(id, .movie, "i.library_id = ?", "i.sort_title", start, count, [lib.id])
+			return try itemPage(id, .movie, "i.library_id = ?", Self.titleOrder, start, count, [lib.id])
 		case "recent":
 			guard start < Self.recentLimit else { return ([], Self.recentLimit) }
 			let n = count == 0 ? Self.recentLimit - start : min(count, Self.recentLimit - start)
@@ -186,10 +193,11 @@ struct LibraryCatalog: Sendable {
 			return try groups(id, "SELECT year, COUNT(*) FROM item WHERE library_id = ? AND year IS NOT NULL GROUP BY year ORDER BY year DESC",
 			                  [lib.id], start, count) { ("\(libID(lib))/y\($0)", String($0)) }
 		case "shows":
-			return try named(id, "S", """
-				SELECT s.id, s.name, COUNT(i.id) FROM show s JOIN item i ON i.show_id = s.id
-				WHERE s.library_id = ? GROUP BY s.id ORDER BY s.sort_name
-				""", [lib.id], start, count)
+			return page(try db.query("""
+				SELECT s.id, COALESCE(ms.title, s.name), COUNT(i.id), ms.id, ms.poster, ms.overview, ms.genres
+				FROM show s JOIN item i ON i.show_id = s.id \(Self.showMeta)
+				WHERE s.library_id = ? GROUP BY s.id ORDER BY COALESCE(ms.sort_title, s.sort_name)
+				""", lib.id) { r in showContainer(r, parent: id) }, start, count)
 		case "dates":
 			return try groups(id, """
 				SELECT CAST(strftime('%Y', taken_at, 'unixepoch', 'localtime') AS INTEGER) y, COUNT(*)
@@ -209,7 +217,7 @@ struct LibraryCatalog: Sendable {
 			return try albums(id, "al.library_id = ?", "al.sort_title", [lib.id], start, count)
 		default:
 			if v.hasPrefix("y"), let year = Int(v.dropFirst()) {
-				return try itemPage(id, .movie, "i.library_id = ? AND i.year = ?", "i.sort_title", start, count, [lib.id, year])
+				return try itemPage(id, .movie, "i.library_id = ? AND i.year = ?", Self.titleOrder, start, count, [lib.id, year])
 			}
 			if v.hasPrefix("py"), let y = Int(v.dropFirst(2)) {
 				let (from, to) = (Self.localDate(y, 1), Self.localDate(y + 1, 1))
@@ -339,8 +347,10 @@ struct LibraryCatalog: Sendable {
 		try db.query("""
 			SELECT i.id, i.library_id, i.dir_id, i.path, i.name, i.size, i.mtime, i.title, i.year, i.season, i.episode,
 			i.episode_title, i.duration_ms, i.width, i.height, s.name, i.taken_at, i.artist, al.title, g.name, i.track, i.subtitle,
-			i.orientation, i.has_art, i.container, i.video_codec, i.audio_codec, i.pix_fmt, i.audio_channels
+			i.orientation, i.has_art, i.container, i.video_codec, i.audio_codec, i.pix_fmt, i.audio_channels,
+			m.id, m.title, m.year, m.overview, m.genres, m.director, m.cast, m.poster, ms.title
 			FROM item i LEFT JOIN show s ON s.id = i.show_id LEFT JOIN album al ON al.id = i.album_id LEFT JOIN genre g ON g.id = i.genre_id
+			\(Self.movieMeta) \(Self.showMeta)
 			WHERE \(filter) ORDER BY \(order) LIMIT ? OFFSET ?
 			""", args + [limit, start]) { r in
 			let id = r.int64(0), name = r.text(4)
@@ -366,12 +376,38 @@ struct LibraryCatalog: Sendable {
 			o.pixFmt = r.optText(27)
 			o.channels = r.optInt(28)
 			if r.bool(23) || (videoArt && o.format?.kind == .video) { o.artItem = id }
+			if let mid = r.optInt(29).map(Int64.init) {
+				o.title = r.optText(30) ?? o.title
+				o.year = r.optInt(31) ?? o.year
+				o.overview = r.optText(32)
+				o.genre = r.optText(33) ?? o.genre
+				o.director = r.optText(34)
+				o.cast = r.optText(35)?.components(separatedBy: ", ") ?? []
+				if r.bool(36) { o.poster = mid }
+			}
 			if let lib = libraries.first(where: { $0.id == r.int64(1) }) {
-				o.title = Self.displayTitle(lib.type, tc, o.title, year: o.year, show: r.optText(15), season: r.optInt(9) ?? 0,
+				o.title = Self.displayTitle(lib.type, tc, o.title, year: o.year, show: r.optText(37) ?? r.optText(15), season: r.optInt(9) ?? 0,
 				                            episode: r.optInt(10) ?? 0, episodeTitle: r.optText(11))
 			}
 			return o
 		}
+	}
+
+	/// Matched metadata of a movie (file title|year) or a show (name|); join after item i, show s.
+	static let movieMeta = """
+		LEFT JOIN title_match m ON m.kind = 'movies' AND m.status IN (1, 2) AND m.query = i.title || '|' || IFNULL(i.year, '')
+		AND (SELECT type FROM library WHERE id = i.library_id) = 'movies'
+		"""
+	static let showMeta = "LEFT JOIN title_match ms ON ms.kind = 'shows' AND ms.status IN (1, 2) AND ms.query = s.name || '|'"
+	/// Movies sort by their matched (Czech) title.
+	static let titleOrder = "COALESCE(m.sort_title, i.sort_title)"
+
+	private func showContainer(_ r: Row, parent: String) -> CatalogObject {
+		var o = container("S\(r.int64(0))", parent, r.text(1), r.int(2))
+		if r.bool(4) { o.poster = r.optInt(3).map(Int64.init) }
+		o.overview = r.optText(5)
+		o.genre = r.optText(6)
+		return o
 	}
 
 	private static func displayTitle(_ t: LibraryType, _ tc: TitleContext, _ title: String, year: Int?, show: String?,

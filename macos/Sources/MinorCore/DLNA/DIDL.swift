@@ -17,7 +17,8 @@ enum DIDL {
 				if let n = o.childCount { b += #" childCount="\#(n)""# }
 				b += "><dc:title>\(o.title.xmlEscaped)</dc:title><upnp:class>\(o.upnpClass ?? "object.container.storageFolder")</upnp:class>"
 				if let a = o.artist { b += "<upnp:artist>\(a.xmlEscaped)</upnp:artist>" }
-				b += art(o, baseURL) + "</container>"
+				if let g = o.genre { b += "<upnp:genre>\(g.xmlEscaped)</upnp:genre>" }
+				b += details(o) + art(o, baseURL) + "</container>"
 			} else if let f = o.format {
 				b += #"<item id="\#(o.id.xmlEscaped)" parentID="\#(o.parentID.xmlEscaped)" restricted="1">"#
 				b += "<dc:title>\(o.title.xmlEscaped)</dc:title><upnp:class>\(itemClass(f.kind))</upnp:class>"
@@ -34,7 +35,7 @@ enum DIDL {
 					if let t = o.track, t > 0 { b += "<upnp:originalTrackNumber>\(t)</upnp:originalTrackNumber>" }
 				}
 				if let g = o.genre { b += "<upnp:genre>\(g.xmlEscaped)</upnp:genre>" }
-				b += art(o, baseURL)
+				b += details(o) + art(o, baseURL)
 				let subs = o.subtitle != nil ? Int64(o.id.dropFirst()).map { baseURL + Subtitles.path(item: $0) } : nil
 				if let subs { b += #"<sec:CaptionInfoEx sec:type="srt">\#(subs.xmlEscaped)</sec:CaptionInfoEx>"# }
 				if f.kind == .image {
@@ -57,7 +58,21 @@ enum DIDL {
 		return b + "</DIDL-Lite>"
 	}
 
+	/// Overview and people of a matched movie or show.
+	private static func details(_ o: CatalogObject) -> String {
+		var b = ""
+		if let d = o.overview { b += "<dc:description>\(d.xmlEscaped)</dc:description>" }
+		if let d = o.director { b += "<upnp:director>\(d.xmlEscaped)</upnp:director>" }
+		for a in o.cast.prefix(5) { b += "<upnp:actor>\(a.xmlEscaped)</upnp:actor>" }
+		return b
+	}
+
+	static func posterPath(_ meta: Int64, _ size: String) -> String { "/poster/\(meta)/\(size).jpg" }
+
 	private static func art(_ o: CatalogObject, _ baseURL: String) -> String {
+		if let p = o.poster {
+			return #"<upnp:albumArtURI dlna:profileID="JPEG_TN">\#((baseURL + posterPath(p, "tn")).xmlEscaped)</upnp:albumArtURI>"#
+		}
 		guard let n = o.artItem, o.format?.kind != .image else { return "" }
 		return #"<upnp:albumArtURI dlna:profileID="JPEG_TN">\#((baseURL + thumbPath(n, "tn")).xmlEscaped)</upnp:albumArtURI>"#
 	}

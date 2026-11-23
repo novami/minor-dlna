@@ -117,6 +117,28 @@ public final class Store: Sendable {
 		CREATE INDEX item_genre ON item (genre_id);
 		CREATE INDEX item_probe ON item (probed);
 		""",
+		"""
+		-- A movie (file title|year) or show (name|) matched to Wikidata; status: 0 not found yet, 1 automatic, 2 by hand, 3 none by hand
+		CREATE TABLE title_match (
+			id         INTEGER PRIMARY KEY,
+			kind       TEXT NOT NULL,
+			query      TEXT NOT NULL,
+			status     INTEGER NOT NULL DEFAULT 0,
+			wikidata   TEXT,
+			title      TEXT,
+			sort_title TEXT,
+			orig_title TEXT,
+			year       INTEGER,
+			overview   TEXT,
+			genres     TEXT,
+			director   TEXT,
+			cast       TEXT,
+			runtime    INTEGER,
+			poster     INTEGER NOT NULL DEFAULT 0,
+			checked_at INTEGER NOT NULL DEFAULT 0,
+			UNIQUE (kind, query)
+		);
+		""",
 	]
 
 	static func migrate(_ db: Database) throws {

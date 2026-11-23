@@ -18,6 +18,7 @@ public struct ServerConfig: Sendable, Equatable {
 	public var databaseURL: URL
 	public var transcode: TranscodeSettings
 	public var remote: RemoteSettings
+	public var metadata: Bool
 
 	public init(settings: Settings, version: String, iconURL: URL?, databaseURL: URL = Store.defaultURL) {
 		name = settings.name.trimmingCharacters(in: .whitespaces).isEmpty ? "MinorDLNA" : settings.name
@@ -29,6 +30,7 @@ public struct ServerConfig: Sendable, Equatable {
 		self.databaseURL = databaseURL
 		transcode = settings.transcode
 		remote = settings.remote
+		metadata = settings.metadata
 	}
 }
 
@@ -74,8 +76,18 @@ public actor MediaServer {
 			return
 		}
 		web.configure(config.remote)
-		let routes = Routes(config: config, store: store, libraries: libraries, web: web)
-		let scanner = LibraryScanner(store: store, libraries: libraries) { _ in Task { await routes.cds.notifyAll() } }
+		var r = Routes(config: config, store: store, libraries: libraries, web: web)
+		let cds = r.cds
+		let meta = config.metadata ? MetadataService(store: store) {
+			_ = try? store.bumpUpdateID()
+			Task { await cds.notifyAll() }
+		} : nil
+		r.meta = meta
+		let routes = r
+		let scanner = LibraryScanner(store: store, libraries: libraries) { _ in
+			meta?.kick()
+			Task { await routes.cds.notifyAll() }
+		}
 		let onState = { @Sendable (s: ServerState) in self.onState(s) }
 		let app = Application(
 			router: routes.router(),
@@ -90,6 +102,7 @@ public actor MediaServer {
 		let group = ServiceGroup(configuration: .init(services: [
 			.init(service: app),
 			.init(service: scanner, successTerminationBehavior: .ignore),
+		] + (meta.map { [.init(service: $0, successTerminationBehavior: .ignore)] } ?? []) + [
 		], logger: logger))
 		self.group = group
 		running = (routes, scanner, libraries)
@@ -134,6 +147,22 @@ public actor MediaServer {
 
 	/// Applies web access settings without a restart; a new password logs everybody out.
 	public func setRemote(_ remote: RemoteSettings) { web.configure(remote) }
+
+	// MARK: Metadata by hand; nil or empty while the server or metadata is off.
+
+	public func metadataEntries() -> [MetaEntry] { (try? running?.routes.meta?.entries()) ?? [] }
+
+	public func metadataSearch(_ id: Int64, _ query: String) async throws -> [MetaCandidate] {
+		guard let meta = running?.routes.meta else { return [] }
+		return try await meta.search(id, query)
+	}
+
+	/// nil wikidata: no metadata for the title.
+	public func metadataSet(_ id: Int64, wikidata: String?) async throws {
+		try await running?.routes.meta?.set(id, wikidata: wikidata)
+	}
+
+	public func metadataRematch(_ id: Int64) throws { try running?.routes.meta?.rematch(id) }
 
 	/// Applies hand-picked client profiles without a restart.
 	public func chooseProfiles(_ clients: [String: String]) {
@@ -198,6 +227,8 @@ struct Routes: Sendable {
 	let transcoder: Transcoder
 	let profiles: ClientProfiles
 	let web: WebRoutes
+	/// Set before the server starts; nil when metadata is off.
+	var meta: MetadataService?
 
 	init(config: ServerConfig, store: Store, libraries: [IndexedLibrary], web access: WebAccess = WebAccess()) {
 		self.config = config
@@ -244,6 +275,8 @@ struct Routes: Sendable {
 		r.head("/transcode/:item/:file") { req, ctx in await transcode(req, ctx) }
 		r.get("/subs/:file") { req, ctx in try await subtitles(req, ctx) }
 		r.head("/subs/:file") { req, ctx in try await subtitles(req, ctx) }
+		r.get("/poster/:meta/:size") { req, ctx in try await poster(req, ctx) }
+		r.head("/poster/:meta/:size") { req, ctx in try await poster(req, ctx) }
 		r.get("/thumb/:item/:size") { req, ctx in try await thumb(req, ctx) }
 		r.head("/thumb/:item/:size") { req, ctx in try await thumb(req, ctx) }
 		web.register(r)
@@ -403,6 +436,19 @@ struct Routes: Sendable {
 		return Response(status: .ok, headers: h, body: ResponseBody { [transcoder, start] writer in
 			try await transcoder.stream(args, session: session, from: start, lease: lease, to: &writer)
 		})
+	}
+
+	private func poster(_ req: Request, _ ctx: DLNAContext) async throws -> Response {
+		let name = (ctx.parameters.get("size") ?? "").replacingOccurrences(of: ".jpg", with: "")
+		guard let meta, let id = Int64(ctx.parameters.get("meta") ?? ""), ["tn", "sm"].contains(name), let size = RenditionSize.named(name) else {
+			return Response(status: .notFound)
+		}
+		let url = meta.posterFile(id, name)
+		guard let bytes = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int) ?? nil else { return Response(status: .notFound) }
+		var h: HTTPFields = [.contentType: "image/jpeg", .cacheControl: "max-age=86400", .contentLength: String(bytes), .transferMode: "Interactive"]
+		if req.headers[.getContentFeatures] == "1" { h[.contentFeatures] = size.contentFeatures }
+		if req.method == .head { return Response(status: .ok, headers: h) }
+		return Response(status: .ok, headers: h, body: try await files.loadFile(path: url.path, context: ctx))
 	}
 
 	private func thumb(_ req: Request, _ ctx: DLNAContext) async throws -> Response {

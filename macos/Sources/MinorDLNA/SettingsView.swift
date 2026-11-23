@@ -19,12 +19,13 @@ struct SettingsView: View {
 			TabView {
 				Tab("Obecné", systemImage: "gearshape") { GeneralTab() }
 				Tab("Knihovny", systemImage: "books.vertical") { LibrariesTab() }
+				Tab("Metadata", systemImage: "film") { MetadataTab() }
 				Tab("Převod", systemImage: "arrow.triangle.2.circlepath") { TranscodeTab() }
 				Tab("Zařízení", systemImage: "tv") { DevicesTab() }
 				Tab("Úložiště", systemImage: "internaldrive") { StorageTab() }
 			}
 		}
-		.frame(width: 560, height: 440)
+		.frame(width: 620, height: 480)
 		.task { await model.watchStatus() }
 	}
 }
