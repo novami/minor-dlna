@@ -78,10 +78,6 @@ public actor MediaServer {
 		web.configure(config.remote)
 		var r = Routes(config: config, store: store, libraries: libraries, web: web)
 		let cds = r.cds
-		r.tv = TVController(store: store, catalog: r.catalog, port: config.port, profiles: r.profiles, transcode: r.transcoder.available) {
-			_ = try? store.bumpUpdateID()
-			Task { await cds.notifyAll() }
-		}
 		let meta = config.metadata ? MetadataService(store: store) {
 			_ = try? store.bumpUpdateID()
 			Task { await cds.notifyAll() }
@@ -107,7 +103,7 @@ public actor MediaServer {
 			.init(service: app),
 			.init(service: scanner, successTerminationBehavior: .ignore),
 		] + (meta.map { [.init(service: $0, successTerminationBehavior: .ignore)] } ?? [])
-			+ (routes.tv.map { [.init(service: $0, successTerminationBehavior: .ignore)] } ?? []), logger: logger))
+			+ [.init(service: routes.tv, successTerminationBehavior: .ignore)], logger: logger))
 		self.group = group
 		running = (routes, scanner, libraries)
 		task = Task {
@@ -193,10 +189,10 @@ public actor MediaServer {
 		}
 	}
 
-	public func tvDevices() async -> [Renderer] { await running?.routes.tv?.devices() ?? [] }
+	public func tvDevices() async -> [Renderer] { await running?.routes.tv.devices() ?? [] }
 	public func tvSearch() async throws -> [Renderer] { try await tv.search() }
 	public func tvWake(_ udn: String) async throws { try await tv.wake(udn) }
-	public func tvStatus() async -> TVStatus? { await running?.routes.tv?.status() }
+	public func tvStatus() async -> TVStatus? { await running?.routes.tv.status() }
 	public func tvCommand(_ c: TVCommand) async throws { try await tv.command(c) }
 
 	/// fromMs > 0 resumes a few seconds before it.
@@ -268,8 +264,7 @@ struct Routes: Sendable {
 	let web: WebRoutes
 	/// Set before the server starts; nil when metadata is off.
 	var meta: MetadataService?
-	/// Set before the server starts.
-	var tv: TVController?
+	let tv: TVController
 
 	init(config: ServerConfig, store: Store, libraries: [IndexedLibrary], web access: WebAccess = WebAccess()) {
 		self.config = config
@@ -277,10 +272,15 @@ struct Routes: Sendable {
 		transcoder = Transcoder(hardware: config.transcode.hardware, maxSessions: config.transcode.maxSessions)
 		profiles = ClientProfiles(dts: config.transcode.dts, chosen: config.transcode.clients)
 		catalog = LibraryCatalog(db: store.reader, libraries: libraries, videoArt: thumbnails.ffmpeg != nil)
-		cds = Eventer { [("SystemUpdateID", String(store.updateID())), ("ContainerUpdateIDs", "")] }
+		let cds = Eventer { [("SystemUpdateID", String(store.updateID())), ("ContainerUpdateIDs", "")] }
+		self.cds = cds
+		tv = TVController(store: store, catalog: catalog, port: config.port, profiles: profiles, transcode: transcoder.available) {
+			_ = try? store.bumpUpdateID()
+			Task { await cds.notifyAll() }
+		}
 		cms = Eventer { [("SourceProtocolInfo", MediaFormat.sourceProtocolInfo), ("SinkProtocolInfo", ""), ("CurrentConnectionIDs", "0")] }
 		icons = config.iconURL.map(Self.renderIcons) ?? [:]
-		web = WebRoutes(access: access) { [config, store] in
+		web = WebRoutes(access: access, catalog: catalog, tv: tv) { [config, store] in
 			let counts = store.counts()
 			return .init(name: config.name, version: config.version, libraries: libraries.map {
 				.init(name: $0.library.name, type: $0.type.rawValue, items: counts[$0.id]?.items ?? 0)

@@ -10,6 +10,8 @@ struct WebRoutes: Sendable {
 	static let csrfHeader = HTTPField.Name("X-MinorDLNA")!
 
 	let access: WebAccess
+	let catalog: LibraryCatalog
+	let tv: TVController
 	let state: @Sendable () -> WebState
 
 	struct WebState: Encodable {
@@ -71,6 +73,81 @@ struct WebRoutes: Sendable {
 			s.local = Self.isLocal(req, ctx)
 			return json(s)
 		}
+		registerLibrary(r)
+	}
+
+	struct TVDevice: Encodable {
+		var udn, name, maker, model, ip: String
+		var online, canWake: Bool
+	}
+
+	private func registerLibrary(_ r: Router<DLNAContext>) {
+		r.get("/api/browse") { req, ctx in
+			if let denied = guarding(req, ctx, .login) { return denied }
+			guard let page = try? catalog.page(req.uri.queryParameters.get("id") ?? "0") else { return error(.notFound, "Položka už neexistuje.") }
+			return json(page)
+		}
+		r.get("/api/search") { req, ctx in
+			if let denied = guarding(req, ctx, .login) { return denied }
+			return json(["entries": catalog.search(req.uri.queryParameters.get("q") ?? "").map(BrowseEntry.init)])
+		}
+		r.get("/api/tv") { req, ctx in
+			if let denied = guarding(req, ctx, .login) { return denied }
+			return await tvState()
+		}
+		r.post("/api/tv/:action") { req, ctx in
+			if let denied = guarding(req, ctx, .login) { return denied }
+			struct Body: Decodable {
+				var udn: String?
+				var id: String?
+				var fromStart: Bool?
+				var command: String?
+				var value: Int?
+			}
+			let data = try await req.body.collect(upTo: 4096)
+			let b = (try? JSONDecoder().decode(Body.self, from: Data(data.readableBytesView))) ?? Body()
+			do {
+				switch ctx.parameters.get("action") {
+				case "search":
+					_ = try await tv.search()
+				case "wake":
+					try await tv.wake(b.udn ?? "")
+				case "play":
+					let item = try? catalog.metadata(b.id ?? "")
+					let from = b.fromStart == true || item?.watched == true ? 0 : item?.positionMs ?? 0
+					try await tv.play(udn: b.udn ?? "", id: b.id ?? "", fromMs: from)
+				case "command":
+					let v = b.value ?? 0
+					let c: TVCommand? = switch b.command {
+					case "pause": .pause
+					case "play": .play
+					case "stop": .stop
+					case "seek": .seek(ms: v)
+					case "volume": .volume(v)
+					case "mute": .mute(v != 0)
+					default: nil
+					}
+					guard let c else { return error(.badRequest, "Neznámý příkaz.") }
+					try await tv.command(c)
+				default:
+					return Response(status: .notFound)
+				}
+			} catch {
+				return self.error(.badRequest, "\(error)")
+			}
+			return await tvState()
+		}
+	}
+
+	private func tvState() async -> Response {
+		struct State: Encodable {
+			var devices: [TVDevice]
+			var status: TVStatus?
+		}
+		let devices = await tv.devices().map {
+			TVDevice(udn: $0.udn, name: $0.name, maker: $0.maker, model: $0.model, ip: $0.ip, online: $0.online, canWake: !$0.mac.isEmpty)
+		}
+		return json(State(devices: devices, status: await tv.status()))
 	}
 
 	/// nil lets the request through.
