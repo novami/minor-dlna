@@ -10,6 +10,10 @@ struct MinorDLNAApp: App {
 		MenuBarExtra("MinorDLNA", systemImage: "play.tv") {
 			MenuContent().environment(model)
 		}
+		Window("Přehled", id: "overview") {
+			OverviewView().environment(model)
+		}
+		.defaultSize(width: 520, height: 560)
 		Settings {
 			SettingsView().environment(model)
 		}
@@ -19,6 +23,7 @@ struct MinorDLNAApp: App {
 private struct MenuContent: View {
 	@Environment(AppModel.self) private var model
 	@Environment(\.openSettings) private var openSettings
+	@Environment(\.openWindow) private var openWindow
 
 	var body: some View {
 		@Bindable var model = model
@@ -26,6 +31,10 @@ private struct MenuContent: View {
 		Text(model.statusText)
 		Text("Verze \(AppModel.version)")
 		Divider()
+		Button("Přehled…") {
+			NSApp.activate()
+			openWindow(id: "overview")
+		}
 		Button("Nastavení…") {
 			// A menu bar app is never active on its own, so the window would open behind others.
 			NSApp.activate()

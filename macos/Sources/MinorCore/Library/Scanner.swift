@@ -53,6 +53,8 @@ final class LibraryScanner: Service, Sendable {
 		var pending: Set<Int64> = []
 		var changed = false // FSEvents reported a change since the last round
 		var lastRound = ContinuousClock.now
+		var scanning = false
+		var missing: [Int64: [String]] = [:] // library → roots not reachable in the last scan
 	}
 	private let state = Mutex(State())
 
@@ -93,6 +95,10 @@ final class LibraryScanner: Service, Sendable {
 		}
 	}
 
+	var scanning: Bool { state.withLock { $0.scanning } }
+
+	func missingRoots() -> [Int64: [String]] { state.withLock { $0.missing } }
+
 	private var changeDue: Bool {
 		state.withLock { $0.changed && ContinuousClock.now - $0.lastRound >= Self.minEventGap }
 	}
@@ -109,7 +115,9 @@ final class LibraryScanner: Service, Sendable {
 		state.withLock {
 			$0.changed = false
 			$0.lastRound = .now
+			$0.scanning = true
 		}
+		defer { state.withLock { $0.scanning = false } }
 		var changed = false
 		for lib in libraries where force || needsScan(lib) {
 			guard !Task.isCancelled else { return }
@@ -217,6 +225,7 @@ final class LibraryScanner: Service, Sendable {
 		let st = try reconcile(lib, files, missingRoots: missingRoots)
 		state.withLock {
 			$0.dirs[lib.id] = dirMtimes
+			$0.missing[lib.id] = missingRoots.sorted()
 			if recent { $0.pending.insert(lib.id) } else { $0.pending.remove(lib.id) }
 		}
 		return st

@@ -9,10 +9,17 @@ final class AppModel {
 		didSet {
 			guard settings != oldValue else { return }
 			save()
-			if serverConfig(settings) != serverConfig(oldValue) { scheduleRestart() }
+			if restartConfig(settings) != restartConfig(oldValue) {
+				scheduleRestart()
+			} else if settings.transcode.clients != oldValue.transcode.clients {
+				Task { [server, clients = settings.transcode.clients] in await server.chooseProfiles(clients) }
+			}
 		}
 	}
 	private(set) var serverState: ServerState = .stopped
+	/// Refreshed while the overview or settings window is open.
+	private(set) var status: ServerStatus?
+	private(set) var cacheSize: Int64?
 	@ObservationIgnored private let server = MediaServer()
 	@ObservationIgnored private var restartTask: Task<Void, Never>?
 
@@ -43,6 +50,39 @@ final class AppModel {
 
 	private func serverConfig(_ s: Settings) -> ServerConfig {
 		ServerConfig(settings: s, version: Self.version, iconURL: Bundle.main.url(forResource: "AppIcon", withExtension: "icns"))
+	}
+
+	/// Hand-picked client profiles apply without a restart.
+	private func restartConfig(_ s: Settings) -> ServerConfig {
+		var s = s
+		s.transcode.clients = [:]
+		return serverConfig(s)
+	}
+
+	/// Polls the server status until the calling view goes away.
+	func watchStatus() async {
+		while !Task.isCancelled {
+			status = await server.status()
+			try? await Task.sleep(for: .seconds(2))
+		}
+	}
+
+	func refreshCacheSize() async {
+		cacheSize = await Task.detached { CacheStorage.size() }.value
+	}
+
+	func clearCache() async {
+		do {
+			try await Task.detached { try CacheStorage.clear() }.value
+		} catch {
+			self.error = "Mezipaměť nešlo smazat: \(error.localizedDescription)"
+		}
+		await refreshCacheSize()
+	}
+
+	/// nil returns the client to automatic detection.
+	func choose(profile: String?, for ip: String) {
+		settings.transcode.clients[ip] = profile
 	}
 
 	/// Debounced, so typing the server name restarts the server once. Each restart waits for the previous one,

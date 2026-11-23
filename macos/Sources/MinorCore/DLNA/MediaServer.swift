@@ -46,6 +46,7 @@ public actor MediaServer {
 	private var task: Task<Void, Never>?
 	/// Kept open across restarts.
 	private var store: (url: URL, store: Store)?
+	private var running: (routes: Routes, scanner: LibraryScanner, libraries: [IndexedLibrary])?
 
 	public init() { (states, continuation) = AsyncStream.makeStream() }
 
@@ -86,6 +87,7 @@ public actor MediaServer {
 			.init(service: scanner, successTerminationBehavior: .ignore),
 		], logger: logger))
 		self.group = group
+		running = (routes, scanner, libraries)
 		task = Task {
 			do {
 				try await group.run()
@@ -110,6 +112,24 @@ public actor MediaServer {
 		await task.value
 		self.group = nil
 		self.task = nil
+		running = nil
+	}
+
+	/// nil while the server is not running.
+	public func status() -> ServerStatus? {
+		guard let (routes, scanner, libraries) = running else { return nil }
+		let counts = routes.store.counts(), missing = scanner.missingRoots()
+		return ServerStatus(
+			libraries: libraries.map { l in
+				LibraryStatus(id: l.library.id, items: counts[l.id]?.items ?? 0, probing: counts[l.id]?.probing ?? 0, missingPaths: missing[l.id] ?? [])
+			},
+			scanning: scanner.scanning, transcodes: routes.transcoder.current, clients: routes.profiles.list(),
+			ffmpeg: routes.transcoder.available, ffprobe: scanner.prober.available)
+	}
+
+	/// Applies hand-picked client profiles without a restart.
+	public func chooseProfiles(_ clients: [String: String]) {
+		running?.routes.profiles.choose(clients)
 	}
 
 	static func serverHeader(_ version: String) -> String {
@@ -174,7 +194,7 @@ struct Routes: Sendable {
 		self.config = config
 		self.store = store
 		transcoder = Transcoder(hardware: config.transcode.hardware, maxSessions: config.transcode.maxSessions)
-		profiles = ClientProfiles(dts: config.transcode.dts)
+		profiles = ClientProfiles(dts: config.transcode.dts, chosen: config.transcode.clients)
 		catalog = LibraryCatalog(db: store.reader, libraries: libraries, videoArt: thumbnails.ffmpeg != nil)
 		cds = Eventer { [("SystemUpdateID", String(store.updateID())), ("ContainerUpdateIDs", "")] }
 		cms = Eventer { [("SourceProtocolInfo", MediaFormat.sourceProtocolInfo), ("SinkProtocolInfo", ""), ("CurrentConnectionIDs", "0")] }
@@ -363,9 +383,9 @@ struct Routes: Sendable {
 		}
 		let args = Transcoder.args(plan, path: path, start: start, hardware: transcoder.hardware,
 		                           decodesInHardware: Transcoder.decodesInHardware(obj))
-		let label = "\(obj.title) [\(plan.key) from \(Int(start)) s to \(ctx.remoteAddress?.ipAddress ?? "-")]"
-		return Response(status: .ok, headers: h, body: ResponseBody { [transcoder] writer in
-			try await transcoder.stream(args, title: label, lease: lease, to: &writer)
+		let session = TranscodeSession(title: obj.title, client: ctx.remoteAddress?.ipAddress ?? "-", plan: plan.key)
+		return Response(status: .ok, headers: h, body: ResponseBody { [transcoder, start] writer in
+			try await transcoder.stream(args, session: session, from: start, lease: lease, to: &writer)
 		})
 	}
 

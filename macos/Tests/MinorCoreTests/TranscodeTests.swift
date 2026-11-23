@@ -31,6 +31,15 @@ private func media(_ container: String, _ video: String?, _ audio: String?, kind
 	#expect(Plan.decide(.generic, media("matroska", "h264", "truehd")) == .direct)
 }
 
+@Test func chosenProfileWins() {
+	let p = ClientProfiles(dts: true, chosen: ["10.0.0.2": "generic"])
+	#expect(p.profile(ip: "10.0.0.1", ident: "webOS TV").name == "lg")
+	#expect(p.profile(ip: "10.0.0.2", ident: "webOS TV").name == "generic")
+	p.choose([:])
+	#expect(p.profile(ip: "10.0.0.2", ident: "").name == "lg") // detection remembers the earlier ident
+	#expect(p.list().map(\.ip).sorted() == ["10.0.0.1", "10.0.0.2"])
+}
+
 @Test func planKeysAndNPT() {
 	#expect(Plan(key: "copy-ac3") == Plan(video: .copy, audio: .ac3))
 	#expect(Plan(key: "x-flac") == Plan(audio: .flac))

@@ -55,8 +55,13 @@ final class ClientProfiles: Sendable {
 
 	let dts: Bool
 	private let clients = Mutex<[String: Seen]>([:])
+	/// IP → profile id chosen by the user.
+	private let chosen: Mutex<[String: String]>
 
-	init(dts: Bool) { self.dts = dts }
+	init(dts: Bool, chosen: [String: String] = [:]) {
+		self.dts = dts
+		self.chosen = Mutex(chosen)
+	}
 
 	func profile(ip: String, ident: String) -> Profile {
 		let all = clients.withLock { c in
@@ -70,6 +75,22 @@ final class ClientProfiles: Sendable {
 			c[ip] = seen
 			return seen.ident
 		}
+		if let id = chosen.withLock({ $0[ip] }), let p = Profile.named(id, dts: dts) { return p }
 		return Profile.named(Profile.detectID(all), dts: dts) ?? .generic
+	}
+
+	/// Applies at once; the next request from the address uses it.
+	func choose(_ c: [String: String]) { chosen.withLock { $0 = c } }
+
+	/// Clients seen since start, plus chosen ones that have not come back yet; most recent first.
+	func list() -> [ClientInfo] {
+		let chosen = chosen.withLock { $0 }
+		var out = clients.withLock { c in
+			c.map { ip, s in ClientInfo(ip: ip, ident: s.ident, detected: Profile.detectID(s.ident), chosen: chosen[ip], lastSeen: s.at) }
+		}
+		let seen = Set(out.map(\.ip))
+		out += chosen.filter { !seen.contains($0.key) }
+			.map { ClientInfo(ip: $0.key, ident: "", detected: Profile.generic.name, chosen: $0.value, lastSeen: .distantPast) }
+		return out.sorted { ($0.lastSeen, $1.ip) > ($1.lastSeen, $0.ip) }
 	}
 }

@@ -11,6 +11,7 @@ final class Transcoder: Sendable {
 	let hardware: Bool
 	private let maxSessions: Int
 	private let active = Mutex(0)
+	private let sessions = Mutex<[UUID: TranscodeSession]>([:])
 
 	init(ffmpeg: String? = Thumbnails.findFFmpeg(), ffprobe: String? = Prober().binary, hardware: Bool, maxSessions: Int) {
 		self.ffmpeg = ffmpeg
@@ -45,6 +46,8 @@ final class Transcoder: Sendable {
 	}
 
 	var running: Int { active.withLock { $0 } }
+
+	var current: [TranscodeSession] { sessions.withLock { $0.values.sorted { $0.began < $1.began } } }
 
 	/// The keyframe at or before t. A copied stream starts there; the other one is cut to match.
 	func keyframe(_ path: String, before t: Double) async -> Double {
@@ -101,8 +104,11 @@ final class Transcoder: Sendable {
 	}
 
 	/// Runs ffmpeg and writes its output until it ends or the client goes away.
-	func stream(_ args: [String], title: String, lease: Lease, to writer: inout any ResponseBodyWriter) async throws {
+	func stream(_ args: [String], session: TranscodeSession, from start: Double, lease: Lease, to writer: inout any ResponseBodyWriter) async throws {
 		guard let ffmpeg else { return }
+		let title = "\(session.title) [\(session.plan) from \(Int(start)) s to \(session.client)]"
+		sessions.withLock { $0[session.id] = session }
+		defer { sessions.withLock { $0[session.id] = nil } }
 		let p = Process()
 		p.executableURL = URL(filePath: ffmpeg)
 		p.arguments = args

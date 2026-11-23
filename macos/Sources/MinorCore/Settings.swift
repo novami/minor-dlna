@@ -59,12 +59,17 @@ public struct TranscodeSettings: Codable, Equatable, Sendable {
 	public var maxSessions: Int
 	/// The TV decodes DTS (differs by model line).
 	public var dts: Bool
+	/// Device IP → profile id chosen by hand; others are detected.
+	public var clients: [String: String]
 
-	public init(hardware: Bool = true, maxSessions: Int = 2, dts: Bool = true) {
+	public init(hardware: Bool = true, maxSessions: Int = 2, dts: Bool = true, clients: [String: String] = [:]) {
 		self.hardware = hardware
 		self.maxSessions = maxSessions
 		self.dts = dts
+		self.clients = clients
 	}
+
+	public static let sessionRange = 1...4
 
 	public init(from decoder: Decoder) throws {
 		let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -72,6 +77,7 @@ public struct TranscodeSettings: Codable, Equatable, Sendable {
 		hardware = try c.decodeIfPresent(Bool.self, forKey: .hardware) ?? d.hardware
 		maxSessions = max(try c.decodeIfPresent(Int.self, forKey: .maxSessions) ?? d.maxSessions, 1)
 		dts = try c.decodeIfPresent(Bool.self, forKey: .dts) ?? d.dts
+		clients = try c.decodeIfPresent([String: String].self, forKey: .clients) ?? d.clients
 	}
 }
 

@@ -19,9 +19,13 @@ struct SettingsView: View {
 			TabView {
 				Tab("Obecné", systemImage: "gearshape") { GeneralTab() }
 				Tab("Knihovny", systemImage: "books.vertical") { LibrariesTab() }
+				Tab("Převod", systemImage: "arrow.triangle.2.circlepath") { TranscodeTab() }
+				Tab("Zařízení", systemImage: "tv") { DevicesTab() }
+				Tab("Úložiště", systemImage: "internaldrive") { StorageTab() }
 			}
 		}
 		.frame(width: 560, height: 440)
+		.task { await model.watchStatus() }
 	}
 }
 
@@ -97,5 +101,97 @@ private struct LibrariesTab: View {
 	private func pick(into id: Library.ID?) {
 		target = id
 		importing = true
+	}
+}
+
+private struct TranscodeTab: View {
+	@Environment(AppModel.self) private var model
+
+	var body: some View {
+		@Bindable var model = model
+		Form {
+			if model.status?.ffmpeg == false {
+				Text("ffmpeg nenalezen, převod nefunguje. Nainstalujte ho příkazem `brew install ffmpeg`.").foregroundStyle(.orange)
+			}
+			Section {
+				Toggle("Převádět hardwarově (VideoToolbox)", isOn: $model.settings.transcode.hardware)
+				Stepper(value: $model.settings.transcode.maxSessions, in: TranscodeSettings.sessionRange) {
+					LabeledContent("Nejvýš souběžných převodů", value: String(model.settings.transcode.maxSessions))
+				}
+			} footer: {
+				Text("Převádí se jen to, co televize sama nepřehraje: video do MPEG-TS s obrazem H.264 a zvukem AAC nebo AC-3, hudba do FLAC. Změna restartuje server.")
+			}
+			Section {
+				Toggle("Televize přehrává zvuk DTS", isOn: $model.settings.transcode.dts)
+			} footer: {
+				Text("Některé modely LG (2020–2022) DTS neumí. Když film s DTS hraje bez zvuku, vypněte to a zvuk se převede.")
+			}
+		}
+		.formStyle(.grouped)
+	}
+}
+
+private struct DevicesTab: View {
+	@Environment(AppModel.self) private var model
+
+	var body: some View {
+		Form {
+			Section {
+				let clients = model.status?.clients ?? []
+				if clients.isEmpty {
+					Text("Zatím se nepřipojila žádná televize ani přehrávač. Otevřete MinorDLNA na televizi.").foregroundStyle(.secondary)
+				}
+				ForEach(clients) { c in
+					Picker(selection: Binding(get: { c.chosen ?? "" }, set: { model.choose(profile: $0.isEmpty ? nil : $0, for: c.ip) })) {
+						Text("Automaticky (\(ProfileOption.label(c.detected)))").tag("")
+						ForEach(ProfileOption.all) { Text($0.label).tag($0.id) }
+					} label: {
+						Text(c.ip)
+						Text(c.ident.isEmpty ? "Dosud se nepřipojilo" : c.ident).lineLimit(1).truncationMode(.tail).help(c.ident)
+					}
+				}
+			} footer: {
+				Text("Profil určuje, co zařízení přehraje samo a co se mu převede. Změna platí hned.")
+			}
+		}
+		.formStyle(.grouped)
+	}
+}
+
+private struct StorageTab: View {
+	@Environment(AppModel.self) private var model
+	@State private var clearing = false
+
+	var body: some View {
+		Form {
+			Section {
+				LabeledContent("Náhledy a fotky pro televizi") {
+					if let size = model.cacheSize {
+						Text(size, format: .byteCount(style: .file))
+					} else {
+						ProgressView().controlSize(.small)
+					}
+				}
+				HStack {
+					Spacer()
+					Button("Smazat mezipaměť") {
+						clearing = true
+						Task {
+							await model.clearCache()
+							clearing = false
+						}
+					}
+					.disabled(clearing || model.cacheSize == 0)
+				}
+			} footer: {
+				Text("Náhledy se při dalším procházení na televizi vytvoří znovu.")
+			}
+			Section("Umístění") {
+				LabeledContent("Nastavení a index", value: AppPaths.support.path)
+				LabeledContent("Mezipaměť", value: CacheStorage.dir.path)
+			}
+		}
+		.formStyle(.grouped)
+		.task { await model.refreshCacheSize() }
 	}
 }
