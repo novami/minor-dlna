@@ -168,7 +168,7 @@ private struct StorageTab: View {
 	var body: some View {
 		Form {
 			Section {
-				LabeledContent("Náhledy a fotky pro televizi") {
+				LabeledContent("Náhledy, plakáty a fotky pro televizi") {
 					if let size = model.cacheSize {
 						Text(size, format: .byteCount(style: .file))
 					} else {
@@ -187,7 +187,7 @@ private struct StorageTab: View {
 					.disabled(clearing || model.cacheSize == 0)
 				}
 			} footer: {
-				Text("Náhledy se při dalším procházení na televizi vytvoří znovu.")
+				Text("Náhledy se při dalším procházení na televizi vytvoří znovu, plakáty se hned znovu stáhnou z Wikipedie.")
 			}
 			Section("Umístění") {
 				LabeledContent("Nastavení a index", value: AppPaths.support.path)

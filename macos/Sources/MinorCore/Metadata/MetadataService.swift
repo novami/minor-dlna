@@ -30,7 +30,8 @@ final class MetadataService: Service, Sendable {
 	static let passInterval = Duration.seconds(6 * 3600)
 	/// Between lookups, to be gentle to the free APIs.
 	static let pause = Duration.milliseconds(300)
-	static var defaultDir: URL { AppPaths.support.appending(path: "posters", directoryHint: .isDirectory) }
+	/// In the caches: clearing the cache (or macOS purging it) only means downloading the posters again.
+	static var defaultDir: URL { URL.cachesDirectory.appending(path: "\(AppPaths.bundleID)/posters", directoryHint: .isDirectory) }
 
 	let store: Store
 	let dir: URL
@@ -125,6 +126,20 @@ final class MetadataService: Service, Sendable {
 			return ids
 		}
 		gone.forEach(removePoster)
+		try refetchMissingPosters()
+	}
+
+	/// Matches whose poster file is gone are looked up again on this pass.
+	func refetchMissingPosters() throws {
+		let missing = try store.reader.query("SELECT id FROM title_match WHERE poster = 1") { $0.int64(0) }.filter { id in
+			!["tn", "sm"].allSatisfy { FileManager.default.fileExists(atPath: posterFile(id, $0).path) }
+		}
+		guard !missing.isEmpty else { return }
+		try store.writer.transaction {
+			for id in missing { _ = try store.writer.run("UPDATE title_match SET poster = 0, checked_at = 0 WHERE id = ?", id) }
+		}
+		Log.library.info("\(missing.count) posters missing, downloading them again")
+		onChange()
 	}
 
 	/// Matches one row automatically, or refreshes a match by hand. Only network failures are thrown.

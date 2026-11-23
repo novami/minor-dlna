@@ -55,4 +55,9 @@ import Testing
 	let didl = DIDL.render(all, baseURL: "http://h:1")
 	#expect(didl.contains("<dc:description>Vánoce 1967.</dc:description>"))
 	#expect(didl.contains("/poster/"))
+
+	// The poster file is gone (cache cleared): the title is looked up again and the TV gets no dead link meanwhile.
+	try meta.refetchMissingPosters()
+	#expect(try store.reader.one("SELECT poster, checked_at FROM title_match WHERE query = 'Cosy Dens|1999'") { [$0.int(0), $0.int(1)] } == [0, 0])
+	#expect(!DIDL.render(try cat.children("L\(libs[0].id)/all", start: 0, count: 0).objects, baseURL: "http://h:1").contains("/poster/"))
 }

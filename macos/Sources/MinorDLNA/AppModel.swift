@@ -82,7 +82,7 @@ final class AppModel {
 
 	func clearCache() async {
 		do {
-			try await Task.detached { try CacheStorage.clear() }.value
+			try await server.clearCache()
 		} catch {
 			self.error = "Mezipaměť nešlo smazat: \(error.localizedDescription)"
 		}

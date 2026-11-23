@@ -164,6 +164,14 @@ public actor MediaServer {
 
 	public func metadataRematch(_ id: Int64) throws { try running?.routes.meta?.rematch(id) }
 
+	/// Deletes thumbnails and posters; posters are downloaded again right away.
+	public func clearCache() throws {
+		try CacheStorage.clear()
+		guard let meta = running?.routes.meta else { return }
+		try meta.refetchMissingPosters()
+		meta.kick()
+	}
+
 	/// Applies hand-picked client profiles without a restart.
 	public func chooseProfiles(_ clients: [String: String]) {
 		running?.routes.profiles.choose(clients)

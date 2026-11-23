@@ -72,21 +72,23 @@ extension Store {
 	}
 }
 
-/// Files the app can regenerate: thumbnails and TV-sized photos.
+/// Files the app can get again: thumbnails, TV-sized photos and posters (downloaded again on the next metadata pass).
 public enum CacheStorage {
-	public static var dir: URL { Thumbnails.defaultDir }
+	public static var dir: URL { URL.cachesDirectory.appending(path: AppPaths.bundleID, directoryHint: .isDirectory) }
+	static var dirs: [URL] { [Thumbnails.defaultDir, MetadataService.defaultDir] }
 
 	public static func size() -> Int64 {
-		guard let e = FileManager.default.enumerator(at: dir, includingPropertiesForKeys: [.totalFileAllocatedSizeKey]) else { return 0 }
 		var total: Int64 = 0
-		for case let url as URL in e {
-			total += Int64((try? url.resourceValues(forKeys: [.totalFileAllocatedSizeKey]).totalFileAllocatedSize) ?? 0)
+		for d in dirs {
+			guard let e = FileManager.default.enumerator(at: d, includingPropertiesForKeys: [.totalFileAllocatedSizeKey]) else { continue }
+			for case let url as URL in e {
+				total += Int64((try? url.resourceValues(forKeys: [.totalFileAllocatedSizeKey]).totalFileAllocatedSize) ?? 0)
+			}
 		}
 		return total
 	}
 
 	public static func clear() throws {
-		guard FileManager.default.fileExists(atPath: dir.path) else { return }
-		try FileManager.default.removeItem(at: dir)
+		for d in dirs where FileManager.default.fileExists(atPath: d.path) { try FileManager.default.removeItem(at: d) }
 	}
 }
