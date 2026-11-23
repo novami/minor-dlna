@@ -26,14 +26,16 @@ public struct Settings: Codable, Equatable, Sendable {
 	public var port: Int
 	public var libraries: [Library]
 	public var autoUpdate: Bool
+	public var transcode: TranscodeSettings
 
 	public init(name: String = Host.current().localizedName ?? "MinorDLNA", uuid: UUID = UUID(), port: Int = 8200,
-	            libraries: [Library] = [], autoUpdate: Bool = true) {
+	            libraries: [Library] = [], autoUpdate: Bool = true, transcode: TranscodeSettings = .init()) {
 		self.name = name
 		self.uuid = uuid
 		self.port = port
 		self.libraries = libraries
 		self.autoUpdate = autoUpdate
+		self.transcode = transcode
 	}
 
 	public init(from decoder: Decoder) throws {
@@ -44,9 +46,33 @@ public struct Settings: Codable, Equatable, Sendable {
 		port = try c.decodeIfPresent(Int.self, forKey: .port) ?? d.port
 		libraries = try c.decodeIfPresent([Library].self, forKey: .libraries) ?? d.libraries
 		autoUpdate = try c.decodeIfPresent(Bool.self, forKey: .autoUpdate) ?? d.autoUpdate
+		transcode = try c.decodeIfPresent(TranscodeSettings.self, forKey: .transcode) ?? d.transcode
 	}
 
 	public static let portRange = 1024...65535
+}
+
+public struct TranscodeSettings: Codable, Equatable, Sendable {
+	/// Encode and decode with VideoToolbox.
+	public var hardware: Bool
+	/// Concurrent ffmpeg processes.
+	public var maxSessions: Int
+	/// The TV decodes DTS (differs by model line).
+	public var dts: Bool
+
+	public init(hardware: Bool = true, maxSessions: Int = 2, dts: Bool = true) {
+		self.hardware = hardware
+		self.maxSessions = maxSessions
+		self.dts = dts
+	}
+
+	public init(from decoder: Decoder) throws {
+		let c = try decoder.container(keyedBy: CodingKeys.self)
+		let d = TranscodeSettings()
+		hardware = try c.decodeIfPresent(Bool.self, forKey: .hardware) ?? d.hardware
+		maxSessions = max(try c.decodeIfPresent(Int.self, forKey: .maxSessions) ?? d.maxSessions, 1)
+		dts = try c.decodeIfPresent(Bool.self, forKey: .dts) ?? d.dts
+	}
 }
 
 public enum SettingsStore {

@@ -4,10 +4,12 @@ enum DIDL {
 	static let header = #"<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" "#
 		+ #"xmlns:dc="http://purl.org/dc/elements/1.1/" "#
 		+ #"xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" "#
-		+ #"xmlns:dlna="urn:schemas-dlna-org:metadata-1-0/">"#
+		+ #"xmlns:dlna="urn:schemas-dlna-org:metadata-1-0/" "#
+		+ #"xmlns:sec="http://www.sec.co.kr/" "#
+		+ #"xmlns:pv="http://www.pv.com/pvns/">"#
 
-	/// baseURL is "http://host:port" as the client sees the server.
-	static func render(_ objects: [CatalogObject], baseURL: String) -> String {
+	/// baseURL is "http://host:port" as the client sees the server; profile nil means no transcoding.
+	static func render(_ objects: [CatalogObject], baseURL: String, profile: Profile? = nil) -> String {
 		var b = header
 		for o in objects {
 			if o.isContainer {
@@ -33,11 +35,22 @@ enum DIDL {
 				}
 				if let g = o.genre { b += "<upnp:genre>\(g.xmlEscaped)</upnp:genre>" }
 				b += art(o, baseURL)
+				let subs = o.subtitle != nil ? Int64(o.id.dropFirst()).map { baseURL + Subtitles.path(item: $0) } : nil
+				if let subs { b += #"<sec:CaptionInfoEx sec:type="srt">\#(subs.xmlEscaped)</sec:CaptionInfoEx>"# }
 				if f.kind == .image {
 					b += photoRes(o, baseURL)
 				} else {
-					b += res(f.protocolInfo, o.size, o.durationMs, o.width, o.height, baseURL + mediaPath(o))
+					// Sony, Philips and some Android players read subtitles from pv: attributes of the media resource.
+					let attrs = subs.map { #" pv:subtitleFileType="SRT" pv:subtitleFileUri="\#($0.xmlEscaped)""# } ?? ""
+					let plan = profile.map { Plan.decide($0, o) } ?? .direct
+					if !plan.isDirect, let n = Int64(o.id.dropFirst()) {
+						// Only the converted stream: offering the original too lets the TV pick a format it can't play.
+						b += res(plan.protocolInfo, 0, o.durationMs, o.width, o.height, baseURL + plan.path(item: n), attrs)
+					} else {
+						b += res(f.protocolInfo, o.size, o.durationMs, o.width, o.height, baseURL + mediaPath(o), attrs)
+					}
 				}
+				if let subs { b += res("http-get:*:text/srt:*", 0, nil, nil, nil, subs) }
 				b += "</item>"
 			}
 		}
@@ -69,8 +82,9 @@ enum DIDL {
 		return b + derived("sm") + derived("tn")
 	}
 
-	private static func res(_ protocolInfo: String, _ size: Int64, _ durationMs: Int?, _ w: Int?, _ h: Int?, _ url: String) -> String {
-		var b = #"<res protocolInfo="\#(protocolInfo.xmlEscaped)""#
+	private static func res(_ protocolInfo: String, _ size: Int64, _ durationMs: Int?, _ w: Int?, _ h: Int?, _ url: String,
+	                        _ attrs: String = "") -> String {
+		var b = #"<res protocolInfo="\#(protocolInfo.xmlEscaped)""# + attrs
 		if size > 0 { b += #" size="\#(size)""# }
 		if let d = durationMs, d > 0 { b += #" duration="\#(duration(d))""# }
 		if let w, let h, w > 0, h > 0 { b += #" resolution="\#(w)x\#(h)""# }

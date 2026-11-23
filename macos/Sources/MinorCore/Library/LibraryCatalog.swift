@@ -23,6 +23,12 @@ struct CatalogObject: Sendable, Equatable {
 	var track: Int?
 	var subtitle: String?
 	var orientation: Int?
+	// From ffprobe, for the transcoding decision.
+	var container: String?
+	var videoCodec: String?
+	var audioCodec: String?
+	var pixFmt: String?
+	var channels: Int?
 	/// Item whose thumbnail is the album art (/thumb/<id>/tn.jpg).
 	var artItem: Int64?
 }
@@ -333,7 +339,7 @@ struct LibraryCatalog: Sendable {
 		try db.query("""
 			SELECT i.id, i.library_id, i.dir_id, i.path, i.name, i.size, i.mtime, i.title, i.year, i.season, i.episode,
 			i.episode_title, i.duration_ms, i.width, i.height, s.name, i.taken_at, i.artist, al.title, g.name, i.track, i.subtitle,
-			i.orientation, i.has_art
+			i.orientation, i.has_art, i.container, i.video_codec, i.audio_codec, i.pix_fmt, i.audio_channels
 			FROM item i LEFT JOIN show s ON s.id = i.show_id LEFT JOIN album al ON al.id = i.album_id LEFT JOIN genre g ON g.id = i.genre_id
 			WHERE \(filter) ORDER BY \(order) LIMIT ? OFFSET ?
 			""", args + [limit, start]) { r in
@@ -354,6 +360,11 @@ struct LibraryCatalog: Sendable {
 			o.track = r.optInt(20)
 			o.subtitle = r.optText(21)
 			o.orientation = r.optInt(22)
+			o.container = r.optText(24)
+			o.videoCodec = r.optText(25)
+			o.audioCodec = r.optText(26)
+			o.pixFmt = r.optText(27)
+			o.channels = r.optInt(28)
 			if r.bool(23) || (videoArt && o.format?.kind == .video) { o.artItem = id }
 			if let lib = libraries.first(where: { $0.id == r.int64(1) }) {
 				o.title = Self.displayTitle(lib.type, tc, o.title, year: o.year, show: r.optText(15), season: r.optInt(9) ?? 0,

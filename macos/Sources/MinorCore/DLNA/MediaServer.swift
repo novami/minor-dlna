@@ -16,6 +16,7 @@ public struct ServerConfig: Sendable, Equatable {
 	/// Image the device icons are rendered from (the app's .icns).
 	public var iconURL: URL?
 	public var databaseURL: URL
+	public var transcode: TranscodeSettings
 
 	public init(settings: Settings, version: String, iconURL: URL?, databaseURL: URL = Store.defaultURL) {
 		name = settings.name.trimmingCharacters(in: .whitespaces).isEmpty ? "MinorDLNA" : settings.name
@@ -25,6 +26,7 @@ public struct ServerConfig: Sendable, Equatable {
 		self.version = version
 		self.iconURL = iconURL
 		self.databaseURL = databaseURL
+		transcode = settings.transcode
 	}
 }
 
@@ -151,6 +153,9 @@ extension HTTPField.Name {
 	static let callback = Self("CALLBACK")!
 	static let timeout = Self("TIMEOUT")!
 	static let ext = Self("EXT")!
+	static let timeSeekRange = Self("TimeSeekRange.dlna.org")!
+	static let captionInfo = Self("CaptionInfo.sec")!
+	static let avClientInfo = Self("X-AV-Client-Info")!
 }
 
 struct Routes: Sendable {
@@ -162,10 +167,14 @@ struct Routes: Sendable {
 	let icons: [Int: Data]
 	let files = FileIO()
 	let thumbnails = Thumbnails()
+	let transcoder: Transcoder
+	let profiles: ClientProfiles
 
 	init(config: ServerConfig, store: Store, libraries: [IndexedLibrary]) {
 		self.config = config
 		self.store = store
+		transcoder = Transcoder(hardware: config.transcode.hardware, maxSessions: config.transcode.maxSessions)
+		profiles = ClientProfiles(dts: config.transcode.dts)
 		catalog = LibraryCatalog(db: store.reader, libraries: libraries, videoArt: thumbnails.ffmpeg != nil)
 		cds = Eventer { [("SystemUpdateID", String(store.updateID())), ("ContainerUpdateIDs", "")] }
 		cms = Eventer { [("SourceProtocolInfo", MediaFormat.sourceProtocolInfo), ("SinkProtocolInfo", ""), ("CurrentConnectionIDs", "0")] }
@@ -180,8 +189,8 @@ struct Routes: Sendable {
 		}
 		r.get("/cds.xml") { _, _ in xml(Descriptions.cds) }
 		r.get("/cms.xml") { _, _ in xml(Descriptions.cms) }
-		r.post("/cds/control") { req, _ in try await control(req, serviceType: Descriptions.cdsType, handler: cdsAction) }
-		r.post("/cms/control") { req, _ in try await control(req, serviceType: Descriptions.cmsType, handler: cmsAction) }
+		r.post("/cds/control") { req, ctx in try await control(req, ctx, serviceType: Descriptions.cdsType, handler: cdsAction) }
+		r.post("/cms/control") { req, ctx in try await control(req, ctx, serviceType: Descriptions.cmsType, handler: cmsAction) }
 		for (path, ev) in [("/cds/event", cds), ("/cms/event", cms)] {
 			r.on(RouterPath(path), method: HTTPRequest.Method("SUBSCRIBE")!) { req, ctx in await subscribe(req, ctx, ev) }
 			r.on(RouterPath(path), method: HTTPRequest.Method("UNSUBSCRIBE")!) { req, _ in
@@ -196,6 +205,10 @@ struct Routes: Sendable {
 		}
 		r.get("/media/:token") { req, ctx in try await media(req, ctx) }
 		r.head("/media/:token") { req, ctx in try await media(req, ctx) }
+		r.get("/transcode/:item/:file") { req, ctx in await transcode(req, ctx) }
+		r.head("/transcode/:item/:file") { req, ctx in await transcode(req, ctx) }
+		r.get("/subs/:file") { req, ctx in try await subtitles(req, ctx) }
+		r.head("/subs/:file") { req, ctx in try await subtitles(req, ctx) }
 		r.get("/thumb/:item/:size") { req, ctx in try await thumb(req, ctx) }
 		r.head("/thumb/:item/:size") { req, ctx in try await thumb(req, ctx) }
 		return r
@@ -203,15 +216,29 @@ struct Routes: Sendable {
 
 	// MARK: SOAP
 
-	private typealias Action = @Sendable (SOAP.Call, String) throws(UPnPError) -> KeyValuePairs<String, String>
+	/// Who is asking: the server address as the client sees it, and what it plays (nil: no transcoding).
+	struct Client {
+		var baseURL: String
+		var profile: Profile?
+	}
 
-	private func control(_ req: Request, serviceType: String, handler: Action) async throws -> Response {
+	private typealias Action = @Sendable (SOAP.Call, Client) throws(UPnPError) -> KeyValuePairs<String, String>
+
+	private func client(_ req: Request, _ ctx: DLNAContext) -> Client {
+		let baseURL = "http://" + (req.head.authority ?? "localhost:\(config.port)")
+		guard transcoder.available else { return Client(baseURL: baseURL) }
+		// Older Sony TVs name themselves only in X-AV-Client-Info.
+		let ident = (req.headers[.userAgent] ?? "") + " " + (req.headers[.avClientInfo] ?? "")
+		return Client(baseURL: baseURL, profile: profiles.profile(ip: ctx.remoteAddress?.ipAddress ?? "", ident: ident))
+	}
+
+	private func control(_ req: Request, _ ctx: DLNAContext, serviceType: String, handler: Action) async throws -> Response {
 		let body = try await req.body.collect(upTo: 1 << 20)
 		guard let call = SOAP.parse(Data(body.readableBytesView), soapAction: req.headers[.soapAction]) else {
 			return fault(.invalidArgs)
 		}
 		do {
-			let out = try handler(call, "http://" + (req.head.authority ?? "localhost:\(config.port)"))
+			let out = try handler(call, client(req, ctx))
 			var r = xml(SOAP.response(action: call.action, serviceType: serviceType, args: out))
 			r.headers[.ext] = ""
 			return r
@@ -221,7 +248,7 @@ struct Routes: Sendable {
 		}
 	}
 
-	private func cdsAction(_ call: SOAP.Call, baseURL: String) throws(UPnPError) -> KeyValuePairs<String, String> {
+	private func cdsAction(_ call: SOAP.Call, client: Client) throws(UPnPError) -> KeyValuePairs<String, String> {
 		switch call.action {
 		case "Browse":
 			let id = call.args["ObjectID"] ?? ""
@@ -233,7 +260,7 @@ struct Routes: Sendable {
 			case "BrowseDirectChildren": (objs, total) = try catalog.children(id, start: start, count: count)
 			default: throw .invalidArgs
 			}
-			return ["Result": DIDL.render(objs, baseURL: baseURL), "NumberReturned": String(objs.count),
+			return ["Result": DIDL.render(objs, baseURL: client.baseURL, profile: client.profile), "NumberReturned": String(objs.count),
 			        "TotalMatches": String(total), "UpdateID": String(store.updateID())]
 		case "GetSearchCapabilities": return ["SearchCaps": ""]
 		case "GetSortCapabilities": return ["SortCaps": "dc:title"]
@@ -242,7 +269,7 @@ struct Routes: Sendable {
 		}
 	}
 
-	private func cmsAction(_ call: SOAP.Call, baseURL _: String) throws(UPnPError) -> KeyValuePairs<String, String> {
+	private func cmsAction(_ call: SOAP.Call, client _: Client) throws(UPnPError) -> KeyValuePairs<String, String> {
 		switch call.action {
 		case "GetProtocolInfo": return ["Source": MediaFormat.sourceProtocolInfo, "Sink": ""]
 		case "GetCurrentConnectionIDs": return ["ConnectionIDs": "0"]
@@ -270,6 +297,7 @@ struct Routes: Sendable {
 		h[.transferMode] = ["Streaming", "Interactive", "Background"].contains(mode ?? "") ? mode : format.transferMode
 		if req.headers[.getContentFeatures] == "1" { h[.contentFeatures] = format.contentFeatures }
 		if let m = obj.modified { h[.lastModified] = httpDate.string(from: m) }
+		captions(obj, req, &h)
 
 		var status = HTTPResponse.Status.ok
 		var range: ClosedRange<Int64> = 0...max(obj.size - 1, 0)
@@ -290,6 +318,55 @@ struct Routes: Sendable {
 		}
 		let body = try await files.loadFile(path: path, range: Int(range.lowerBound)...Int(range.upperBound), context: ctx)
 		return Response(status: status, headers: h, body: body)
+	}
+
+	/// Announces external subtitles to the TV player.
+	private func captions(_ o: CatalogObject, _ req: Request, _ h: inout HTTPFields) {
+		guard o.subtitle != nil, let n = Int64(o.id.dropFirst()) else { return }
+		h[.captionInfo] = "http://" + (req.head.authority ?? "localhost:\(config.port)") + Subtitles.path(item: n)
+	}
+
+	private func subtitles(_ req: Request, _ ctx: DLNAContext) async throws -> Response {
+		let name = ctx.parameters.get("file") ?? ""
+		guard name.hasSuffix(".srt"), let obj = catalog.media(Substring(name.dropLast(4))), let path = obj.subtitle,
+		      let fh = FileHandle(forReadingAtPath: path) else { return Response(status: .notFound) }
+		defer { try? fh.close() }
+		let data = Subtitles.utf8(try fh.read(upToCount: 5 << 20) ?? Data())
+		let h: HTTPFields = [.contentType: "text/srt; charset=utf-8", .contentLength: String(data.count)]
+		if req.method == .head { return Response(status: .ok, headers: h) }
+		return Response(status: .ok, headers: h, body: .init(byteBuffer: ByteBuffer(bytes: data)))
+	}
+
+	private func transcode(_ req: Request, _ ctx: DLNAContext) async -> Response {
+		let file = ctx.parameters.get("file") ?? ""
+		guard transcoder.available, let plan = Plan(key: file.prefix { $0 != "." }),
+		      let item = ctx.parameters.get("item"), Int64(item) != nil, let obj = catalog.media(Substring(item)),
+		      let path = obj.path, let kind = obj.format?.kind, kind == .video || kind == .audio,
+		      plan.video == nil || kind == .video else { return Response(status: .notFound) }
+
+		var h: HTTPFields = [.contentType: plan.mime, .transferMode: "Streaming"]
+		if req.headers[.getContentFeatures] == "1" { h[.contentFeatures] = Plan.contentFeatures }
+		captions(obj, req, &h)
+		var start = 0.0
+		let dur = Double(obj.durationMs ?? 0) / 1000
+		if let tsr = req.headers[.timeSeekRange] {
+			guard let from = Transcoder.parseNPT(tsr), dur <= 0 || from < dur else { return Response(status: .rangeNotSatisfiable, headers: h) }
+			start = from
+			// A copied stream starts at the keyframe before, and the reply says where it really starts.
+			if plan.video != nil, plan.video == .copy || plan.audio == .copy { start = await transcoder.keyframe(path, before: start) }
+			if dur > 0 { h[.timeSeekRange] = String(format: "npt=%.3f-%.3f/%.3f", start, dur, dur) }
+		}
+		if req.method == .head { return Response(status: .ok, headers: h) }
+		guard let lease = await transcoder.acquire() else {
+			Log.server.warning("transcode refused, all sessions busy: \(obj.title, privacy: .public)")
+			return Response(status: .serviceUnavailable)
+		}
+		let args = Transcoder.args(plan, path: path, start: start, hardware: transcoder.hardware,
+		                           decodesInHardware: Transcoder.decodesInHardware(obj))
+		let label = "\(obj.title) [\(plan.key) from \(Int(start)) s to \(ctx.remoteAddress?.ipAddress ?? "-")]"
+		return Response(status: .ok, headers: h, body: ResponseBody { [transcoder] writer in
+			try await transcoder.stream(args, title: label, lease: lease, to: &writer)
+		})
 	}
 
 	private func thumb(_ req: Request, _ ctx: DLNAContext) async throws -> Response {
