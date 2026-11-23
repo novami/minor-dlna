@@ -150,6 +150,8 @@ actor TVController: Service {
 	}
 
 	func setAutoNext(_ on: Bool) { autoNext = on }
+	/// The web player follows the same setting.
+	var playsNextEpisode: Bool { autoNext }
 
 	// MARK: Session
 

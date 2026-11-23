@@ -104,3 +104,32 @@ func transcodeForLG() async throws {
 		}
 	}
 }
+
+@Test func decideForBrowser() {
+	#expect(Plan.decideBrowser(media("mov,mp4,m4a", "h264", "aac", kind: "x.mp4"), hevc: false) == .direct)
+	#expect(Plan.decideBrowser(media("matroska,webm", "h264", "ac3"), hevc: false) == Plan(video: .copy, audio: .aac))
+	#expect(Plan.decideBrowser(media("mov,mp4", "hevc", "aac", kind: "x.mp4"), hevc: false) == Plan(video: .h264, audio: .copy))
+	#expect(Plan.decideBrowser(media("mov,mp4", "hevc", "aac", kind: "x.mp4"), hevc: true) == .direct)
+	#expect(Plan.decideBrowser(media("matroska", "h264", nil, pix: "yuv420p10le"), hevc: false) == Plan(video: .h264))
+	#expect(Plan.decideBrowser(media("flac", nil, "flac", kind: "x.flac"), hevc: false) == .direct)
+	#expect(Plan.decideBrowser(media("mov,mp4,m4a", nil, "alac", kind: "x.m4a"), hevc: false) == Plan(audio: .aac))
+}
+
+@Test func browserStreamDetails() {
+	// Dolby Vision profile 5 level 6 and profile 8 level 13
+	#expect(StreamInfo.dvCodec("dvh1", [1, 0, 0x0A, 0x35]) == "dvh1.05.06")
+	#expect(StreamInfo.dvCodec("dvh1", [1, 0, 0x10, 0x6D]) == "dvh1.08.13")
+	// Main 10, high tier off, level 5.1
+	#expect(StreamInfo.hevcCodec("hvc1", [1, 0x02, 0x20, 0, 0, 0, 0xB0, 0, 0, 0, 0, 0, 153]) == "hvc1.2.4.L153.B0")
+	#expect(HDR(probe: "color_transfer=unknown\ndv_profile=5\n") == HDR(transfer: "smpte2084", dvProfile: 5))
+
+	let srt = Data("1\r\n00:00:05,000 --> 00:00:08,500\r\nAhoj\r\n\r\n2\r\n00:01:00,000 --> 00:01:02,000\r\nSvěte\r\n".utf8)
+	#expect(Subtitles.vtt(srt, shift: 6) == "WEBVTT\n\n00:00:00.000 --> 00:00:02.500\nAhoj\n\n00:00:54.000 --> 00:00:56.000\nSvěte\n\n")
+	#expect(!Subtitles.vtt(srt, shift: 9).contains("Ahoj"))
+
+	let m3u8 = "#EXTM3U\n#EXT-X-TARGETDURATION:4\n#EXTINF:4.000,\ns00000.m4s\n"
+	#expect(!HLSPlaylist.ready(m3u8))
+	#expect(HLSPlaylist.ready(m3u8 + "#EXTINF:4.000,\ns00001.m4s\n"))
+	#expect(HLSPlaylist.startAtBeginning(m3u8).hasPrefix("#EXTM3U\n#EXT-X-START:TIME-OFFSET=0,PRECISE=YES\n#EXT-X-TARGETDURATION"))
+	#expect(HLSSessions.validName("s00012.m4s") && HLSSessions.validName("master.m3u8") && !HLSSessions.validName("../x.m4s"))
+}

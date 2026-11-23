@@ -285,7 +285,11 @@ struct Routes: Sendable {
 		}
 		cms = Eventer { [("SourceProtocolInfo", MediaFormat.sourceProtocolInfo), ("SinkProtocolInfo", ""), ("CurrentConnectionIDs", "0")] }
 		icons = config.iconURL.map(Self.renderIcons) ?? [:]
-		web = WebRoutes(access: access, catalog: catalog, tv: tv) { [config, store] in
+		web = WebRoutes(access: access, catalog: catalog, tv: tv, store: store, transcoder: transcoder,
+		                hls: HLSSessions(transcoder: transcoder), positionSaved: {
+		                	_ = try? store.bumpUpdateID()
+		                	Task { await cds.notifyAll() }
+		                }) { [config, store] in
 			let counts = store.counts()
 			return .init(name: config.name, version: Version.display(config.version), libraries: libraries.map {
 				.init(name: $0.library.name, type: $0.type.rawValue, items: counts[$0.id]?.items ?? 0)

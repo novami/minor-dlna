@@ -3,7 +3,8 @@ import Foundation
 /// How a file reaches the client; both nil is direct play. The plan is part of the stream URL,
 /// so the streaming request does not depend on which player component fetches it.
 struct Plan: Sendable, Equatable {
-	enum Video: String, Sendable { case copy, h264 }
+	/// sdr: HDR tone-mapped to 1080p H.264, only for web players.
+	enum Video: String, Sendable { case copy, h264, sdr }
 	enum Audio: String, Sendable { case copy, aac, ac3, flac }
 
 	var video: Video?
@@ -69,6 +70,24 @@ struct Plan: Sendable, Equatable {
 		}
 		return plan
 	}
+
+	/// Direct play of what every current browser plays from an MP4/MP3/FLAC file, otherwise fragmented MP4
+	/// with H.264 (HEVC when the browser decodes it) and AAC.
+	static func decideBrowser(_ o: CatalogObject, hevc: Bool) -> Plan {
+		guard let kind = o.format?.kind, kind == .video || kind == .audio,
+		      let container = o.container?.split(separator: ",").first.map(String.init), !container.isEmpty else { return .direct }
+		if kind == .audio {
+			return browserAudioFiles.contains(container) && browserAudio.contains(o.audioCodec ?? "") ? .direct : Plan(audio: .aac)
+		}
+		let vc = o.videoCodec ?? ""
+		let videoOK = (vc == "h264" && !is10Bit(o.pixFmt)) || (vc == "hevc" && hevc)
+		let audioOK = o.audioCodec.map { ["aac", "mp3"].contains($0) } ?? true
+		if container == "mov", videoOK, audioOK { return .direct }
+		return Plan(video: videoOK ? .copy : .h264, audio: o.audioCodec == nil ? nil : audioOK ? .copy : .aac)
+	}
+
+	private static let browserAudioFiles: Set = ["mp3", "mov", "flac", "wav", "aac"]
+	private static let browserAudio: Set = ["mp3", "aac", "flac", "pcm_s16le", "pcm_s24le"]
 
 	static func is10Bit(_ pixFmt: String?) -> Bool {
 		guard let f = pixFmt else { return false }

@@ -47,6 +47,10 @@ final class Transcoder: Sendable {
 
 	var running: Int { active.withLock { $0 } }
 
+	/// Shows a conversion that does not stream through stream(_:) in the overview.
+	func track(_ s: TranscodeSession) { sessions.withLock { $0[s.id] = s } }
+	func untrack(_ id: UUID) { sessions.withLock { $0[id] = nil } }
+
 	var current: [TranscodeSession] { sessions.withLock { $0.values.sorted { $0.began < $1.began } } }
 
 	/// The keyframe at or before t. A copied stream starts there; the other one is cut to match.
@@ -65,9 +69,32 @@ final class Transcoder: Sendable {
 
 	/// ffmpeg arguments for a TV stream.
 	static func args(_ p: Plan, path: String, start: Double, hardware: Bool, decodesInHardware: Bool) -> [String] {
+		let a = baseArgs(p, path: path, start: start, hardware: hardware, decodesInHardware: decodesInHardware)
+		if p.video == nil { return a + ["-f", "flac", "pipe:1"] }
+		return a + ["-sn", "-dn", "-f", "mpegts", "-muxdelay", "0", "-muxpreload", "0", "pipe:1"]
+	}
+
+	/// Scales to 1080p and tone-maps HDR to SDR in VideoToolbox, as Homebrew's ffmpeg has no zscale.
+	static let sdrFilter = "scale_vt=w='min(1920,iw)':h=-2:color_matrix=bt709:color_primaries=bt709:color_transfer=bt709"
+
+	/// Input, stream selection and codecs; the caller adds the muxer.
+	/// throttle limits reading to twice real time, for outputs written to disk instead of a pipe.
+	static func baseArgs(_ p: Plan, path: String, start: Double, hardware: Bool, decodesInHardware: Bool, throttle: Bool = false) -> [String] {
 		var a = ["-nostdin", "-hide_banner", "-v", "error", "-fflags", "+genpts"]
+		if throttle { a += ["-readrate", "2", "-readrate_initial_burst", "60"] }
 		if start > 0 { a += ["-ss", String(format: "%.3f", start)] }
-		if p.video == .h264, hardware, decodesInHardware { a += ["-hwaccel", "videotoolbox"] }
+		var hwFrames = false // decoded frames stay in VideoToolbox
+		switch p.video {
+		case .h264 where hardware && decodesInHardware:
+			a += ["-hwaccel", "videotoolbox"]
+		case .sdr where hardware && decodesInHardware:
+			a += ["-hwaccel", "videotoolbox", "-hwaccel_output_format", "videotoolbox_vld"]
+			hwFrames = true
+		case .sdr:
+			// Tone mapping needs VideoToolbox even without hardware decoding; frames are uploaded to it.
+			a += ["-init_hw_device", "videotoolbox=vt", "-filter_hw_device", "vt"]
+		default: break
+		}
 		a += ["-i", path]
 		if p.video == nil {
 			a += ["-map", "0:a:0", "-vn"]
@@ -77,13 +104,18 @@ final class Transcoder: Sendable {
 		}
 		switch p.video {
 		case .copy: a += ["-c:v", "copy"]
-		case .h264:
+		case .h264, .sdr:
 			// Capped at 1080p: sources needing H.264 are older formats, and it keeps encoding real-time.
-			a += ["-vf", "scale=w='min(1920,iw)':h=-2,format=yuv420p"]
+			var vf = "scale=w='min(1920,iw)':h=-2,format=yuv420p"
+			if p.video == .sdr {
+				vf = (hwFrames ? "" : "format=p010le,hwupload,") + sdrFilter
+				if !hardware { vf += ",hwdownload,format=p010le,format=yuv420p" }
+			}
+			a += ["-vf", vf]
 			a += hardware
 				? ["-c:v", "h264_videotoolbox", "-profile:v", "high", "-b:v", "10M", "-maxrate", "15M", "-bufsize", "20M"]
 				: ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-profile:v", "high"]
-			// Regular keyframes for seeking; VideoToolbox alone sets one every half second.
+			// Regular keyframes for seeking and HLS segments; VideoToolbox alone sets one every half second.
 			a += ["-force_key_frames", "expr:gte(t,n_forced*2)", "-g", "600"]
 		case nil: break
 		}
@@ -94,8 +126,19 @@ final class Transcoder: Sendable {
 		case .flac: a += ["-c:a", "flac"]
 		case nil: break
 		}
-		if p.video == nil { return a + ["-f", "flac", "pipe:1"] }
-		return a + ["-sn", "-dn", "-f", "mpegts", "-muxdelay", "0", "-muxpreload", "0", "pipe:1"]
+		return a
+	}
+
+	/// Finishes browser output arguments; Safari plays copied HEVC only tagged hvc1.
+	static func browserMux(_ a: [String], _ p: Plan, hevcSource: Bool) -> [String] {
+		(p.video == .copy && hevcSource ? a + ["-tag:v", "hvc1"] : a) + ["-sn", "-dn", "-avoid_negative_ts", "make_zero"]
+	}
+
+	/// Fragmented MP4 to a pipe; seeking is a new request from another start.
+	static func mp4Args(_ p: Plan, _ o: CatalogObject, path: String, start: Double, hardware: Bool) -> [String] {
+		browserMux(baseArgs(p, path: path, start: start, hardware: hardware, decodesInHardware: decodesInHardware(o)), p,
+		           hevcSource: o.videoCodec == "hevc")
+			+ ["-f", "mp4", "-movflags", "frag_keyframe+empty_moov+default_base_moof", "pipe:1"]
 	}
 
 	/// VideoToolbox decodes these on every Apple Silicon Mac; AV1 before M3 fails outright instead of falling back.

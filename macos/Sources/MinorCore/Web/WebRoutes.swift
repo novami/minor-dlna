@@ -12,6 +12,11 @@ struct WebRoutes: Sendable {
 	let access: WebAccess
 	let catalog: LibraryCatalog
 	let tv: TVController
+	let store: Store
+	let transcoder: Transcoder
+	let hls: HLSSessions
+	/// A position saved by the web player: the TV library shows it.
+	let positionSaved: @Sendable () -> Void
 	let state: @Sendable () -> WebState
 
 	struct WebState: Encodable {
@@ -27,7 +32,7 @@ struct WebRoutes: Sendable {
 		var local = false
 	}
 
-	private enum Gate {
+	enum Gate {
 		/// The page shell and login, so a remote device can show the login form.
 		case open
 		case login
@@ -74,6 +79,7 @@ struct WebRoutes: Sendable {
 			return json(s)
 		}
 		registerLibrary(r)
+		registerPlayer(r)
 	}
 
 	struct TVDevice: Encodable {
@@ -151,7 +157,7 @@ struct WebRoutes: Sendable {
 	}
 
 	/// nil lets the request through.
-	private func guarding(_ req: Request, _ ctx: DLNAContext, _ gate: Gate) -> Response? {
+	func guarding(_ req: Request, _ ctx: DLNAContext, _ gate: Gate) -> Response? {
 		if req.method != .get, req.method != .head, req.headers[Self.csrfHeader] != "1" { return Response(status: .forbidden) }
 		if Self.isLocal(req, ctx) { return nil }
 		guard access.enabled else {
@@ -182,13 +188,13 @@ struct WebRoutes: Sendable {
 		return nil
 	}
 
-	private func json(_ v: some Encodable) -> Response {
+	func json(_ v: some Encodable) -> Response {
 		let data = (try? JSONEncoder().encode(v)) ?? Data("{}".utf8)
 		return Response(status: .ok, headers: [.contentType: "application/json; charset=utf-8", .cacheControl: "no-store"],
 		                body: .init(byteBuffer: ByteBuffer(bytes: data)))
 	}
 
-	private func error(_ status: HTTPResponse.Status, _ message: String) -> Response {
+	func error(_ status: HTTPResponse.Status, _ message: String) -> Response {
 		var r = json(["error": message])
 		r.status = status
 		return r
