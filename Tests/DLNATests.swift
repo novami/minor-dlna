@@ -76,22 +76,28 @@ final class DLNATests: XCTestCase {
 	}
 
 	func testRestartReusesPort() async throws {
-		let settings = Settings(name: "Test", port: Self.freePort())
 		let dir = FileManager.default.temporaryDirectory.appending(path: "minordlna-\(UUID())")
 		defer { try? FileManager.default.removeItem(at: dir) }
-		let config = ServerConfig(settings: settings, version: "test", iconURL: nil, databaseURL: dir.appending(path: "index.sqlite"))
 		let a = MediaServer(), b = MediaServer()
 		func next(_ s: MediaServer, where ok: (ServerState) -> Bool) async -> ServerState? {
 			for await st in s.states where ok(st) { return st }
 			return nil
 		}
 		let isFinal = { (s: ServerState) in if case .starting = s { false } else if case .stopped = s { false } else { true } }
-		await a.start(config)
-		do { let ok = await next(a, where: isFinal).map { if case .running = $0 { true } else { false } } == true; XCTAssertTrue(ok) }
-		await a.start(config)
-		do { let ok = await next(a, where: isFinal).map { if case .running = $0 { true } else { false } } == true; XCTAssertTrue(ok) }
-		await b.start(config)
-		do { let ok = await next(b, where: isFinal); XCTAssertEqual(ok, .failed("Port \(settings.port) už používá jiná aplikace.")) }
+		let isRunning = { (s: ServerState?) in if case .running = s { true } else { false } }
+		// Another test process can take the freed port before the server does, so try a few ports.
+		var port = 0, config: ServerConfig?
+		for _ in 0..<5 {
+			port = Self.freePort()
+			let c = ServerConfig(settings: Settings(name: "Test", port: port), version: "test", iconURL: nil, databaseURL: dir.appending(path: "index.sqlite"))
+			await a.start(c)
+			if isRunning(await next(a, where: isFinal)) { config = c; break }
+		}
+		let running = try XCTUnwrap(config, "no free port found")
+		await a.start(running)
+		do { let st = await next(a, where: isFinal); XCTAssertTrue(isRunning(st), "restart on port \(port): \(String(describing: st))") }
+		await b.start(running)
+		do { let st = await next(b, where: isFinal); XCTAssertEqual(st, .failed("Port \(port) už používá jiná aplikace.")) }
 		await a.stop()
 		await b.stop()
 	}
