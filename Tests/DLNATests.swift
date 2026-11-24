@@ -63,8 +63,20 @@ final class DLNATests: XCTestCase {
 		XCTAssertEqual(unknown.status, .notFound)
 	}
 
+	/// A port the system has just reported free (a random fixed range can collide with ephemeral ports on CI).
+	private static func freePort() -> Int {
+		let fd = socket(AF_INET, SOCK_STREAM, 0)
+		defer { close(fd) }
+		var addr = sockaddr_in()
+		addr.sin_family = sa_family_t(AF_INET)
+		addr.sin_addr.s_addr = INADDR_LOOPBACK.bigEndian
+		var len = socklen_t(MemoryLayout<sockaddr_in>.size)
+		withUnsafeMutablePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { _ = Darwin.bind(fd, $0, len); _ = getsockname(fd, $0, &len) } }
+		return Int(UInt16(bigEndian: addr.sin_port))
+	}
+
 	func testRestartReusesPort() async throws {
-		let settings = Settings(name: "Test", port: Int.random(in: 40000...50000))
+		let settings = Settings(name: "Test", port: Self.freePort())
 		let dir = FileManager.default.temporaryDirectory.appending(path: "minordlna-\(UUID())")
 		defer { try? FileManager.default.removeItem(at: dir) }
 		let config = ServerConfig(settings: settings, version: "test", iconURL: nil, databaseURL: dir.appending(path: "index.sqlite"))
