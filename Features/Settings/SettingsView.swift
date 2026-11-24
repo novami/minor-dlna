@@ -128,8 +128,16 @@ private struct TranscodeTab: View {
 				Text("ffmpeg nenalezen, převod nefunguje. Nainstalujte ho příkazem `brew install ffmpeg`.").foregroundStyle(.orange)
 			}
 			Section {
-				Stepper(value: $model.settings.transcode.maxSessions, in: TranscodeSettings.sessionRange) {
-					LabeledContent("Nejvýš souběžných převodů", value: String(model.settings.transcode.maxSessions))
+				LabeledContent("Nejvýš souběžných převodů") {
+					HStack(spacing: 8) {
+						Text(String(model.settings.transcode.maxSessions))
+							.monospacedDigit()
+							.frame(minWidth: 32)
+							.padding(.vertical, 3)
+							.background(.quaternary, in: RoundedRectangle(cornerRadius: 5))
+						Stepper("", value: $model.settings.transcode.maxSessions, in: TranscodeSettings.sessionRange)
+							.labelsHidden()
+					}
 				}
 			} footer: {
 				Text("Převádí se jen to, co televize sama nepřehraje: video do MPEG-TS s obrazem H.264 a zvukem AAC nebo AC-3, hudba do FLAC. Změna restartuje server.")
