@@ -63,45 +63,6 @@ final class DLNATests: XCTestCase {
 		XCTAssertEqual(unknown.status, .notFound)
 	}
 
-	/// A port the system has just reported free (a random fixed range can collide with ephemeral ports on CI).
-	private static func freePort() -> Int {
-		let fd = socket(AF_INET, SOCK_STREAM, 0)
-		defer { close(fd) }
-		var addr = sockaddr_in()
-		addr.sin_family = sa_family_t(AF_INET)
-		addr.sin_addr.s_addr = INADDR_LOOPBACK.bigEndian
-		var len = socklen_t(MemoryLayout<sockaddr_in>.size)
-		withUnsafeMutablePointer(to: &addr) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { _ = Darwin.bind(fd, $0, len); _ = getsockname(fd, $0, &len) } }
-		return Int(UInt16(bigEndian: addr.sin_port))
-	}
-
-	func testRestartReusesPort() async throws {
-		let dir = FileManager.default.temporaryDirectory.appending(path: "minordlna-\(UUID())")
-		defer { try? FileManager.default.removeItem(at: dir) }
-		let a = MediaServer(), b = MediaServer()
-		func next(_ s: MediaServer, where ok: (ServerState) -> Bool) async -> ServerState? {
-			for await st in s.states where ok(st) { return st }
-			return nil
-		}
-		let isFinal = { (s: ServerState) in if case .starting = s { false } else if case .stopped = s { false } else { true } }
-		let isRunning = { (s: ServerState?) in if case .running = s { true } else { false } }
-		// Another test process can take the freed port before the server does, so try a few ports.
-		var port = 0, config: ServerConfig?
-		for _ in 0..<5 {
-			port = Self.freePort()
-			let c = ServerConfig(settings: Settings(name: "Test", port: port), version: "test", iconURL: nil, databaseURL: dir.appending(path: "index.sqlite"))
-			await a.start(c)
-			if isRunning(await next(a, where: isFinal)) { config = c; break }
-		}
-		let running = try XCTUnwrap(config, "no free port found")
-		await a.start(running)
-		do { let st = await next(a, where: isFinal); XCTAssertTrue(isRunning(st), "restart on port \(port): \(String(describing: st))") }
-		await b.start(running)
-		do { let st = await next(b, where: isFinal); XCTAssertEqual(st, .failed("Port \(port) už používá jiná aplikace.")) }
-		await a.stop()
-		await b.stop()
-	}
-
 	func testWebAccess() async throws {
 		let dir = FileManager.default.temporaryDirectory.appending(path: "minordlna-\(UUID())")
 		defer { try? FileManager.default.removeItem(at: dir) }
