@@ -1,44 +1,22 @@
 name: CI
 
 on:
+  pull_request:
   push:
     branches: [main]
-    paths: ["macos/**", "packaging/**", ".swiftlint.yml", ".github/workflows/ci.yml"]
-  pull_request:
-    paths: ["macos/**", "packaging/**", ".swiftlint.yml", ".github/workflows/ci.yml"]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
 
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   lint:
-    runs-on: macos-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - run: brew install swiftlint
-      - run: swiftlint lint --strict
+    uses: novami/minor-swift-core/.github/workflows/lint.yml@0.1.1
 
   test:
-    # macos-latest is Apple Silicon (arm64), the only architecture the app is built for.
-    runs-on: macos-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - id: swift
-        run: echo "version=$(swift --version 2>&1 | grep -o 'Swift version [0-9.]*' | tr ' ' '-')" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: macos/.build
-          key: build-${{ runner.os }}-${{ runner.arch }}-${{ steps.swift.outputs.version }}-${{ hashFiles('macos/Package.swift', 'macos/Package.resolved') }}-${{ github.sha }}
-          restore-keys: build-${{ runner.os }}-${{ runner.arch }}-${{ steps.swift.outputs.version }}-${{ hashFiles('macos/Package.swift', 'macos/Package.resolved') }}-
-      - run: swift test --package-path macos
-      - run: swift build -c release --arch arm64 --package-path macos
+    uses: novami/minor-swift-core/.github/workflows/app-test.yml@0.1.1
+    with:
+      scheme: MinorDLNA

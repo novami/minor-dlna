@@ -1,0 +1,15 @@
+{
+  "originHash" : "841ed2d395bcfd487edfb2cb117e8ad1604c362ba0ab49731eddd1db6bbc5b13",
+  "pins" : [
+    {
+      "identity" : "minor-swift-core",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/novami/minor-swift-core.git",
+      "state" : {
+        "revision" : "7ccc18fbb17080c53551459b5af1c473f6c4b848",
+        "version" : "0.1.1"
+      }
+    }
+  ],
+  "version" : 3
+}
