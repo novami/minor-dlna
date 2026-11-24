@@ -53,7 +53,7 @@ final class TranscodeTests: XCTestCase {
 	}
 
 	func testTranscodeForLG() async throws {
-				let ffmpeg = try XCTUnwrap(Thumbnails.findFFmpeg(), "build the bundled ffmpeg first: scripts/build-ffmpeg.sh")
+				let ffmpeg = try XCTUnwrap(Thumbnails.findFFmpeg(), "build the bundled ffmpeg first: Scripts/build-ffmpeg.sh")
 		let dir = FileManager.default.temporaryDirectory.appending(path: "minordlna-\(UUID())")
 		try FileManager.default.createDirectory(at: dir.appending(path: "Filmy"), withIntermediateDirectories: true)
 		defer { try? FileManager.default.removeItem(at: dir) }

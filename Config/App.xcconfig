@@ -1,4 +1,4 @@
-// App identity – the only file to edit per app (scripts/rename.sh fills it in).
+// App identity – the only file to edit per app.
 APP_NAME = MinorDLNA
 APP_BUNDLE_IDENTIFIER = cz.novami.minor.dlna
 UPDATE_REPOSITORY = novami/minor-dlna

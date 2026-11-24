@@ -41,7 +41,7 @@ final class MediaTests: XCTestCase {
 	}
 
 	func testProbeMusic() async throws {
-		let ffmpeg = try XCTUnwrap(FFmpegTools.path("ffmpeg"), "build the bundled ffmpeg first: scripts/build-ffmpeg.sh")
+		let ffmpeg = try XCTUnwrap(FFmpegTools.path("ffmpeg"), "build the bundled ffmpeg first: Scripts/build-ffmpeg.sh")
 		XCTAssertTrue(Prober().available)
 		let dir = FileManager.default.temporaryDirectory.appending(path: "minordlna-\(UUID())")
 		defer { try? FileManager.default.removeItem(at: dir) }

@@ -5,8 +5,6 @@ Mediální server pro macOS ve Swiftu. Přidáte složky s videi, fotkami a hudb
 - přes **DLNA/UPnP** televizím a přehrávačům (primárně LG webOS 22+; profily i pro Samsung, Sony, Panasonic, Hisense, Android TV a Roku),
 - přes **webové rozhraní** v prohlížeči (např. Safari na iPhonu), včetně přehrávání a ovládání televize.
 
-Historický návrh: [docs/NAVRH.md](docs/NAVRH.md) (z doby Go verze, částečně zastaralý).
-
 ## Funkce
 
 - Knihovny Filmy, Seriály, Složky, Fotky (vč. HEIC) a Hudba; index v SQLite, složky jsou uložené i jako bookmarky (přežijí přesun nebo přejmenování), změny sleduje FSEvents.
@@ -32,12 +30,12 @@ Hotová verze je v [GitHub Releases](https://github.com/novami/minor-dlna/releas
 Xcode 26+, macOS 26+. Projekt vychází ze šablony [minor-swift-starter](https://github.com/novami/minor-swift-starter); nastavení buildu je v `Config/*.xcconfig`.
 
 ```bash
-./scripts/build-ffmpeg.sh                    # LGPL ffmpeg a ffprobe do build/ffmpeg/out (první běh pár minut)
+./Scripts/build-ffmpeg.sh                    # LGPL ffmpeg a ffprobe do build/ffmpeg/out (první běh pár minut)
 xcodebuild test -scheme MinorDLNA -destination 'platform=macOS,arch=arm64'
 swiftlint lint --strict
 ```
 
-Build aplikace spouští `scripts/build-ffmpeg.sh` sám (fáze *Build ffmpeg*); hotový výsledek se znovu nepoužije jen při změně skriptu nebo verze.
+Build aplikace spouští `Scripts/build-ffmpeg.sh` sám (fáze *Build ffmpeg*); hotový výsledek se znovu nepoužije jen při změně skriptu nebo verze.
 
 Data: `~/Library/Application Support/cz.novami.minor.dlna` (nastavení, index), cache `~/Library/Caches/cz.novami.minor.dlna`. Logy: `log stream --predicate 'subsystem == "cz.novami.minor.dlna"'`. Webové rozhraní: `http://localhost:8200/`.
 
@@ -52,7 +50,8 @@ Core/          Settings, Status, AppPaths, AppLog
   Store/         SQLite (systémová knihovna)
 Features/      Library, Media, Metadata, Transcode, Renderer (Přehrát na TV), Web, Overview, TV, Settings
 Config/        xcconfig: identita aplikace, verze, build
-scripts/       build-ffmpeg.sh
+Scripts/       build-ffmpeg.sh
+Assets/        zdroj ikony aplikace (icon.svg)
 Tests/         XCTest
 ```
 
@@ -66,8 +65,8 @@ Podrobnosti jsou v [SECURITY.md](SECURITY.md). Server přijímá jen klienty z p
 
 Aplikace: MIT.
 
-**ffmpeg:** v aplikaci (`Contents/Helpers/ffmpeg`, `ffprobe`) je ffmpeg 9.0.2 sestavený jako **LGPL v2.1+** (`--disable-gpl --disable-nonfree`, bez libx264 a libx265; video se kóduje přes VideoToolbox). Zdrojové kódy přesné verze: <https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz> (SHA-256 `8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e`), postup sestavení: [scripts/build-ffmpeg.sh](scripts/build-ffmpeg.sh). Text licence je v aplikaci jako `Contents/Resources/FFMPEG-LICENSE.txt`. ffmpeg je spouštěný jako samostatný proces, aplikaci nelinkuje.
+**ffmpeg:** v aplikaci (`Contents/Helpers/ffmpeg`, `ffprobe`) je ffmpeg 9.0.2 sestavený jako **LGPL v2.1+** (`--disable-gpl --disable-nonfree`, bez libx264 a libx265; video se kóduje přes VideoToolbox). Zdrojové kódy přesné verze: <https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz> (SHA-256 `8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e`), postup sestavení: [Scripts/build-ffmpeg.sh](Scripts/build-ffmpeg.sh). Text licence je v aplikaci jako `Contents/Resources/FFMPEG-LICENSE.txt`. ffmpeg je spouštěný jako samostatný proces, aplikaci nelinkuje.
 
-## Vydání (správce)
+## Přispívání a vydání
 
-Tag `X.Y.Z` (bez „v“, shodný s `MARKETING_VERSION` v `Config/Version.xcconfig`) na `main` spustí `release.yml` z minor-swift-core: archiv, podpis Developer ID, notarizace, GitHub Release s `MinorDLNA-X.Y.Z.zip`. V repozitáři musí být nastavené secrety `DEVELOPER_ID_P12`, `DEVELOPER_ID_P12_PASSWORD`, `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8` a v `Config/App.xcconfig` `DEVELOPMENT_TEAM`. **Bez nich vydání selže.**
+Viz [CONTRIBUTING.md](CONTRIBUTING.md).
