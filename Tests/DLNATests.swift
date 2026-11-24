@@ -65,7 +65,9 @@ final class DLNATests: XCTestCase {
 
 	func testRestartReusesPort() async throws {
 		let settings = Settings(name: "Test", port: Int.random(in: 40000...50000))
-		let config = ServerConfig(settings: settings, version: "test", iconURL: nil)
+		let dir = FileManager.default.temporaryDirectory.appending(path: "minordlna-\(UUID())")
+		defer { try? FileManager.default.removeItem(at: dir) }
+		let config = ServerConfig(settings: settings, version: "test", iconURL: nil, databaseURL: dir.appending(path: "index.sqlite"))
 		let a = MediaServer(), b = MediaServer()
 		func next(_ s: MediaServer, where ok: (ServerState) -> Bool) async -> ServerState? {
 			for await st in s.states where ok(st) { return st }
@@ -77,7 +79,7 @@ final class DLNATests: XCTestCase {
 		await a.start(config)
 		do { let ok = await next(a, where: isFinal).map { if case .running = $0 { true } else { false } } == true; XCTAssertTrue(ok) }
 		await b.start(config)
-		do { let ok = await next(b, where: isFinal) == .failed("Port \(settings.port) už používá jiná aplikace."); XCTAssertTrue(ok) }
+		do { let ok = await next(b, where: isFinal); XCTAssertEqual(ok, .failed("Port \(settings.port) už používá jiná aplikace.")) }
 		await a.stop()
 		await b.stop()
 	}
