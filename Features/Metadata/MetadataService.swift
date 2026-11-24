@@ -30,7 +30,7 @@ nonisolated final class MetadataService: BackgroundService {
 	/// Between lookups, to be gentle to the free APIs.
 	static let pause = Duration.milliseconds(300)
 	/// In the caches: clearing the cache (or macOS purging it) only means downloading the posters again.
-	static var defaultDir: URL { URL.cachesDirectory.appending(path: "\(AppPaths.bundleID)/posters", directoryHint: .isDirectory) }
+	static var defaultDir: URL { AppPaths.caches.appending(path: "posters", directoryHint: .isDirectory) }
 
 	let store: Store
 	let dir: URL

@@ -7,6 +7,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 		AppLog.app.info("Launched \(version, privacy: .public)")
 	}
 
+	/// Stops the server before the app quits: SSDP says goodbye and ffmpeg processes end.
+	static var shutdown: (@MainActor () async -> Void)?
+
+	func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+		guard let shutdown = Self.shutdown else { return .terminateNow }
+		Task { @MainActor in
+			await shutdown()
+			sender.reply(toApplicationShouldTerminate: true)
+		}
+		return .terminateLater
+	}
+
 	func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
 		false
 	}

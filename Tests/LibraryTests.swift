@@ -4,6 +4,21 @@ import XCTest
 import Synchronization
 
 final class LibraryTests: XCTestCase {
+	func testRenamedFolderIsFoundThroughItsBookmark() throws {
+		let dir = FileManager.default.temporaryDirectory.appending(path: "minordlna-\(UUID())")
+		defer { try? FileManager.default.removeItem(at: dir) }
+		let before = dir.appending(path: "Filmy"), after = dir.appending(path: "Filmy 2")
+		try FileManager.default.createDirectory(at: before, withIntermediateDirectories: true)
+		let path = LibraryBookmarks.resolve(try XCTUnwrap(LibraryBookmarks.bookmark(before.path))) ?? before.path
+		var libs = LibraryBookmarks.refresh([Library(name: "Filmy", type: .movies, paths: [path])])
+		XCTAssertEqual(libs[0].paths, [path])
+		XCTAssertNotNil(libs[0].bookmarks?[path])
+		try FileManager.default.moveItem(at: before, to: after)
+		libs = LibraryBookmarks.refresh(libs)
+		XCTAssertEqual(libs[0].paths.map { URL(filePath: $0).lastPathComponent }, ["Filmy 2"])
+		XCTAssertNotNil(libs[0].bookmarks?[libs[0].paths[0]])
+	}
+
 	func testMovieNames() {
 		XCTAssertTrue(Names.movie("Film.Name.2019.1080p.BluRay.x264.mkv") == ("Film Name", 2019))
 		XCTAssertTrue(Names.movie("2001 A Space Odyssey (1968).mkv") == ("2001 A Space Odyssey", 1968))

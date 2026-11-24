@@ -12,6 +12,7 @@
 		AA0000000000000000000103 /* MinorUpdater in Frameworks */ = {isa = PBXBuildFile; productRef = AA0000000000000000000203 /* MinorUpdater */; };
 		AB0000000000000000000111 /* ffmpeg in Embed Helpers */ = {isa = PBXBuildFile; fileRef = AB0000000000000000000521 /* ffmpeg */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		AB0000000000000000000112 /* ffprobe in Embed Helpers */ = {isa = PBXBuildFile; fileRef = AB0000000000000000000522 /* ffprobe */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		AB0000000000000000000113 /* FFMPEG-LICENSE.txt in Resources */ = {isa = PBXBuildFile; fileRef = AB0000000000000000000523 /* FFMPEG-LICENSE.txt */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -234,6 +235,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				AB0000000000000000000113 /* FFMPEG-LICENSE.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

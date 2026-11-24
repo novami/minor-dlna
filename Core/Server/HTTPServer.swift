@@ -149,6 +149,8 @@ nonisolated final class HTTPServer: Sendable {
 		for f in headers.fields { text += "\(f.name.name): \(Self.clean(f.value))\r\n" }
 		try await c.send(Data((text + "\r\n").utf8))
 		if headOnly { return }
+		let awake: SleepGuard.Hold? = if case .empty = response.body { nil } else if case .data = response.body { nil } else { SleepGuard.shared.hold() }
+		defer { withExtendedLifetime(awake) {} }
 		switch response.body {
 		case .empty: break
 		case let .data(d): try await c.send(d)

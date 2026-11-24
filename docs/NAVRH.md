@@ -1,6 +1,6 @@
 # MinorDLNA – návrh
 
-> Historický návrh z doby Go verze (smazána v S9). Aktuální stav: [README](../README.md), [SWIFT.md](SWIFT.md).
+> Historický návrh z doby Go verze (smazána v S9). Aktuální stav: [README](../README.md).
 
 Mediální server v Go pro sdílení videí, fotek a hudby z Macu do TV (primárně LG webOS 2022+) přes DLNA/UPnP AV. Cíl: plnohodnotný domácí mediální server bez cloudu – TV používá vestavěný přehrávač (LG: *Média / Připojená zařízení*), k tomu webové rozhraní pro procházení, přehrávání v prohlížeči a spouštění přehrávání na TV.
 

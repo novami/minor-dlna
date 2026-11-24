@@ -9,12 +9,15 @@ nonisolated struct Library: Codable, Equatable, Identifiable, Sendable {
 	var name: String
 	var type: LibraryType
 	var paths: [String]
+	/// Bookmarks of the folders by the path they were made for, so a moved or renamed folder is found again.
+	var bookmarks: [String: Data]?
 
-	init(id: UUID = UUID(), name: String, type: LibraryType, paths: [String]) {
+	init(id: UUID = UUID(), name: String, type: LibraryType, paths: [String], bookmarks: [String: Data]? = nil) {
 		self.id = id
 		self.name = name
 		self.type = type
 		self.paths = paths
+		self.bookmarks = bookmarks
 	}
 }
 

@@ -33,7 +33,7 @@ nonisolated struct RenditionSize: Sendable, Equatable {
 /// JPEG thumbnails and TV-sized photos, generated on first request and cached on disk.
 /// ImageIO decodes HEIC and applies the EXIF orientation; ffmpeg grabs video frames and embedded cover art.
 nonisolated final class Thumbnails: Sendable {
-	static var defaultDir: URL { URL.cachesDirectory.appending(path: "\(AppPaths.bundleID)/thumbs", directoryHint: .isDirectory) }
+	static var defaultDir: URL { AppPaths.caches.appending(path: "thumbs", directoryHint: .isDirectory) }
 
 	let dir: URL
 	let ffmpeg: String?

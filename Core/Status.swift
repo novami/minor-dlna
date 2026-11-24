@@ -81,7 +81,7 @@ nonisolated extension Store {
 
 /// Files the app can get again: thumbnails, TV-sized photos and posters (downloaded again on the next metadata pass).
 nonisolated enum CacheStorage {
-	static var dir: URL { URL.cachesDirectory.appending(path: AppPaths.bundleID, directoryHint: .isDirectory) }
+	static var dir: URL { AppPaths.caches }
 	static var dirs: [URL] { [Thumbnails.defaultDir, MetadataService.defaultDir] }
 
 	static func size() -> Int64 {

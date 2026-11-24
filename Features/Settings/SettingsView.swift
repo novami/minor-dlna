@@ -220,10 +220,10 @@ private struct WebSection: View {
 		Section {
 			Toggle("Povolit přístup z jiných zařízení", isOn: $model.settings.remote.enabled)
 			HStack {
-				SecureField(model.settings.remote.passwordHash.isEmpty ? "Heslo (aspoň \(WebPassword.minLength) znaků)" : "Nové heslo",
+				SecureField(model.settings.remote.passwordHash.isEmpty ? "PIN nebo heslo (aspoň \(WebPassword.minLength) znaků)" : "Nový PIN nebo heslo",
 				            text: $password)
 					.onChange(of: password) { saved = false }
-				Button(model.settings.remote.passwordHash.isEmpty ? "Nastavit heslo" : "Změnit heslo") {
+				Button(model.settings.remote.passwordHash.isEmpty ? "Nastavit PIN" : "Změnit PIN") {
 					saving = true
 					Task {
 						await model.setPassword(password)
@@ -234,9 +234,9 @@ private struct WebSection: View {
 				}
 				.disabled(saving || password.count < WebPassword.minLength)
 			}
-			if saved { Text("Heslo uloženo, přihlášená zařízení byla odhlášena.").foregroundStyle(.secondary) }
+			if saved { Text("PIN uložen do Klíčenky, přihlášená zařízení byla odhlášena.").foregroundStyle(.secondary) }
 			if model.settings.remote.enabled, model.settings.remote.passwordHash.isEmpty {
-				Text("Bez hesla zůstane přístup vypnutý.").foregroundStyle(.orange)
+				Text("Bez PINu nebo hesla zůstane přístup vypnutý.").foregroundStyle(.orange)
 			}
 			if model.settings.remote.active {
 				ForEach(model.remoteURLs, id: \.self) { url in
@@ -246,7 +246,7 @@ private struct WebSection: View {
 		} header: {
 			Text("Webové rozhraní")
 		} footer: {
-			Text("Na tomto Macu se otevře bez hesla přes menu v liště. Jiná zařízení v místní síti se přihlásí heslem.")
+			Text("Na tomto Macu se otevře bez hesla přes menu v liště. Jiná zařízení v místní síti se přihlásí PINem nebo heslem, které je uložené v Klíčence. Výchozí stav je vypnuto.")
 		}
 	}
 }

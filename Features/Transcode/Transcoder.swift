@@ -22,6 +22,7 @@ nonisolated final class Transcoder: Sendable {
 	/// A held transcoding slot, released when the response body that owns it goes away.
 	final class Lease: Sendable {
 		private let release: @Sendable () -> Void
+		private let awake = SleepGuard.shared.hold()
 		init(_ release: @escaping @Sendable () -> Void) { self.release = release }
 		deinit { release() }
 	}

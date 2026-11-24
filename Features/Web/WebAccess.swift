@@ -47,7 +47,7 @@ nonisolated enum PasswordVault {
 /// PBKDF2-SHA256, stored as "pbkdf2-sha256$rounds$salt$hash" (base64).
 nonisolated enum WebPassword {
 	static let rounds: UInt32 = 210_000
-	static let minLength = 8
+	static let minLength = 6
 
 	static func hash(_ password: String) -> String {
 		var salt = [UInt8](repeating: 0, count: 16)

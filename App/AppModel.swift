@@ -42,6 +42,7 @@ final class AppModel {
 
 	init() {
 		tv = TVModel(server: server)
+		AppDelegate.shutdown = { [server] in await server.stop() }
 		AppPaths.migrateLegacyData()
 		do {
 			settings = try SettingsStore.load()
@@ -60,6 +61,7 @@ final class AppModel {
 			settings = Settings()
 			self.error = "Nastavení nešlo načíst, začíná se znovu. Původní soubor: \(bad.path)"
 		}
+		settings.libraries = LibraryBookmarks.refresh(settings.libraries)
 		save() // persists the generated UUID and name on first launch
 		Task { [weak self, states = server.states] in
 			for await state in states { self?.serverState = state }
@@ -162,6 +164,9 @@ final class AppModel {
 			try? await Task.sleep(for: delay)
 			// Read now: web access and client profiles may have changed during the delay without a restart of their own.
 			guard !Task.isCancelled, let self else { return }
+			// A library folder that was moved or renamed is followed through its bookmark.
+			let followed = LibraryBookmarks.refresh(settings.libraries)
+			if followed.map(\.paths) != settings.libraries.map(\.paths) { settings.libraries = followed }
 			await server.start(serverConfig(settings))
 		}
 	}
@@ -212,6 +217,7 @@ final class AppModel {
 			let name = URL(filePath: paths[0]).lastPathComponent
 			settings.libraries.append(Library(name: name, type: .movies, paths: paths))
 		}
+		settings.libraries = LibraryBookmarks.refresh(settings.libraries)
 	}
 }
 

@@ -132,6 +132,7 @@ actor MediaServer {
 		guard let task else { return }
 		task.cancel()
 		await task.value
+		await running?.routes.web.hls.stopAll()
 		self.task = nil
 		running = nil
 	}

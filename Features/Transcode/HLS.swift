@@ -19,7 +19,7 @@ actor HLSSessions {
 	private var sessions: [String: Session] = [:]
 	private var reaper: Task<Void, Never>?
 
-	init(transcoder: Transcoder, root: URL = FileManager.default.temporaryDirectory.appending(path: "cz.minordlna.app-hls"),
+	init(transcoder: Transcoder, root: URL = FileManager.default.temporaryDirectory.appending(path: AppPaths.bundleID),
 	     idle: Duration = .seconds(120)) {
 		self.transcoder = transcoder
 		self.root = root
@@ -103,6 +103,14 @@ actor HLSSessions {
 	func stop(_ token: String) {
 		guard let s = sessions.removeValue(forKey: token) else { return }
 		close(s)
+	}
+
+	/// Ends every session, when the server stops or the app quits.
+	func stopAll() {
+		for (_, s) in sessions { close(s) }
+		sessions = [:]
+		reaper?.cancel()
+		reaper = nil
 	}
 
 	/// The folder of an active session, which counts as used.
