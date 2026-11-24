@@ -43,7 +43,6 @@ final class AppModel {
 	init() {
 		tv = TVModel(server: server)
 		AppDelegate.shutdown = { [server] in await server.stop() }
-		AppPaths.migrateLegacyData()
 		do {
 			settings = try SettingsStore.load()
 			// The 1.0 release kept the password hash in settings.json; it belongs in the Keychain.

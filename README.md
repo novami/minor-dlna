@@ -25,7 +25,7 @@ Historický návrh: [docs/NAVRH.md](docs/NAVRH.md) (z doby Go verze, částečn�
 
 Hotová verze je v [GitHub Releases](https://github.com/novami/minor-dlna/releases) (podepsaná Developer ID, notarizovaná). Aktualizace hlídá `MinorUpdater` ze [minor-swift-core](https://github.com/novami/minor-swift-core): ověří SHA-256, podpis stejného týmu, shodné Bundle ID a vyšší verzi.
 
-**Přechod z verze 1.0:** Bundle ID se změnilo na `cz.novami.minor.dlna`, takže 1.0 se sama neaktualizuje. Novou verzi stáhněte ručně; při prvním spuštění zkopíruje nastavení a index z `~/Library/Application Support/cz.minordlna.app` (původní složka zůstane). Starou aplikaci ukončete, jinak obě obsadí stejný port.
+**Přechod z verze 1.0:** Bundle ID se změnilo na `cz.novami.minor.dlna`, takže 1.0 se sama neaktualizuje; novou verzi stáhněte ručně a starou ukončete, jinak obě obsadí stejný port. Data se nepřenášejí, knihovny se přidají znovu.
 
 ## Sestavení ze zdrojů
 

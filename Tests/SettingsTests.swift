@@ -33,17 +33,4 @@ final class SettingsTests: XCTestCase {
 		XCTAssertFalse(written.contains("pbkdf2"))
 		XCTAssertTrue(written.contains("enabled"))
 	}
-
-	func testLegacyDataIsCopiedOnce() throws {
-		let dir = FileManager.default.temporaryDirectory.appending(path: "minordlna-\(UUID())")
-		defer { try? FileManager.default.removeItem(at: dir) }
-		let old = dir.appending(path: "old"), new = dir.appending(path: "new")
-		try FileManager.default.createDirectory(at: old, withIntermediateDirectories: true)
-		try Data("{}".utf8).write(to: old.appending(path: "settings.json"))
-		XCTAssertTrue(AppPaths.migrateLegacyData(from: old, to: new))
-		XCTAssertTrue(FileManager.default.fileExists(atPath: new.appending(path: "settings.json").path))
-		try Data("changed".utf8).write(to: new.appending(path: "settings.json"))
-		XCTAssertFalse(AppPaths.migrateLegacyData(from: old, to: new)) // never over data that is already there
-		XCTAssertEqual(try String(contentsOf: new.appending(path: "settings.json"), encoding: .utf8), "changed")
-	}
 }
