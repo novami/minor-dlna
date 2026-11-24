@@ -21,4 +21,4 @@ jobs:
     with:
       scheme: MinorDLNA
       cache-path: build/ffmpeg/out
-      cache-key-files: scripts/build-ffmpeg.sh
+      cache-key-files: Scripts/build-ffmpeg.sh

@@ -55,7 +55,7 @@
 		AB0000000000000000000521 /* ffmpeg */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = ffmpeg; path = build/ffmpeg/out/ffmpeg; sourceTree = SOURCE_ROOT; };
 		AB0000000000000000000522 /* ffprobe */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.executable"; name = ffprobe; path = build/ffmpeg/out/ffprobe; sourceTree = SOURCE_ROOT; };
 		AB0000000000000000000523 /* FFMPEG-LICENSE.txt */ = {isa = PBXFileReference; lastKnownFileType = text; name = "FFMPEG-LICENSE.txt"; path = "build/ffmpeg/out/FFMPEG-LICENSE.txt"; sourceTree = SOURCE_ROOT; };
-		AB0000000000000000000524 /* build-ffmpeg.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "scripts/build-ffmpeg.sh"; sourceTree = SOURCE_ROOT; };
+		AB0000000000000000000524 /* build-ffmpeg.sh */ = {isa = PBXFileReference; lastKnownFileType = text.script.sh; path = "Scripts/build-ffmpeg.sh"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -257,7 +257,7 @@
 			inputFileListPaths = (
 			);
 			inputPaths = (
-				"$(SRCROOT)/scripts/build-ffmpeg.sh",
+				"$(SRCROOT)/Scripts/build-ffmpeg.sh",
 			);
 			name = "Build ffmpeg";
 			outputFileListPaths = (
@@ -268,7 +268,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
-			shellScript = "\"${SRCROOT}/scripts/build-ffmpeg.sh\"\n";
+			shellScript = "\"${SRCROOT}/Scripts/build-ffmpeg.sh\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
