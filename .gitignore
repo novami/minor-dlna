@@ -1,5 +1,10 @@
 /bin/
 /dist/
-/macos/.build/
-/macos/.swiftpm/
+build/
+.build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.p12
+*.p8
 .DS_Store

@@ -1,66 +1,73 @@
 # MinorDLNA
 
-DLNA/UPnP mediální server pro macOS ve Swiftu: sdílí videa, fotky a hudbu z Macu do televize (primárně LG webOS 22+; profily i pro Samsung, Sony, Panasonic, Hisense, Android TV a Roku). Podrobný návrh a historie: [docs/NAVRH.md](docs/NAVRH.md) (původní návrh, částečně zastaralý), [docs/SWIFT.md](docs/SWIFT.md) (přepis do Swiftu).
+Mediální server pro macOS ve Swiftu. Přidáte složky s videi, fotkami a hudbou a aplikace je zpřístupní v domácí síti:
+
+- přes **DLNA/UPnP** televizím a přehrávačům (primárně LG webOS 22+; profily i pro Samsung, Sony, Panasonic, Hisense, Android TV a Roku),
+- přes **webové rozhraní** v prohlížeči (např. Safari na iPhonu), včetně přehrávání a ovládání televize.
+
+Historický návrh: [docs/NAVRH.md](docs/NAVRH.md) (z doby Go verze, částečně zastaralý).
 
 ## Funkce
 
-- Knihovny Filmy, Seriály, Složky, Fotky (vč. HEIC) a Hudba, index v SQLite, sledování složek přes FSEvents.
-- Přímé přehrávání s přetáčením; formáty, které TV neumí (TrueHD, DTS, WMV…), se převádějí přes ffmpeg s VideoToolbox. Externí titulky `.srt`.
+- Knihovny Filmy, Seriály, Složky, Fotky (vč. HEIC) a Hudba; index v SQLite, složky jsou uložené i jako bookmarky (přežijí přesun nebo přejmenování), změny sleduje FSEvents.
+- Přímé přehrávání s přetáčením (`Range`). Co televize nebo prohlížeč neumí, se převede přes ffmpeg: nejdřív bez překódování (remux), jen když nesedí kodeky, kóduje se (VideoToolbox, AAC). Externí titulky `.srt`.
+- Webový přehrávač: přímo, nebo HLS (Safari přehrává nativně včetně přetáčení), výběr zvukové stopy a titulků.
 - České názvy, popisy a plakáty z Wikidaty a Wikipedie (lze vypnout).
-- Přehrát na TV, pokračování od uložené pozice, ovladač (včetně webového rozhraní pro telefon, chráněného heslem).
-- Aplikace v liště nabídek, okno Knihovna a Přehled, nastavení.
+- Přehrát na TV, pokračování od uložené pozice, ovladač.
+- Aplikace v liště nabídek (stav serveru, adresa webu, počet klientů a převodů), okno Knihovna, Přehled a Nastavení. Spouštění po přihlášení je volitelné (výchozí vypnuto), během streamování se Mac neuspí.
 
 ## Požadavky
 
-- Mac s **Apple Silicon (arm64)**, macOS 15 nebo novější. Intel Macy aplikace nepodporuje.
-- ffmpeg a ffprobe pro převody a náhledy: `brew install ffmpeg`.
-- Povolení *Místní síť* při prvním spuštění, jinak TV server neuvidí.
+- Mac s **Apple Silicon (arm64)**, **macOS 26** nebo novější.
+- Při prvním spuštění povolit *Místní síť*, jinak televize server neuvidí. Složky Plocha, Dokumenty, Stažené, externí a síťové disky vyvolají systémový dotaz na oprávnění.
 
-## Instalace a sestavení
+## Instalace
 
-Hotová verze: [GitHub Releases](https://github.com/novami/minor-dlna/releases). Aplikace je podepsaná vlastním certifikátem, **není notarizovaná** – při prvním spuštění je nutné ji v Gatekeeperu povolit (Soukromí a zabezpečení → Přesto otevřít).
+Hotová verze je v [GitHub Releases](https://github.com/novami/minor-dlna/releases) (podepsaná Developer ID, notarizovaná). Aktualizace hlídá `MinorUpdater` ze [minor-swift-core](https://github.com/novami/minor-swift-core): ověří SHA-256, podpis stejného týmu, shodné Bundle ID a vyšší verzi.
 
-Ze zdrojů (Xcode Command Line Tools / Swift 6):
+**Přechod z verze 1.0:** Bundle ID se změnilo na `cz.novami.minor.dlna`, takže 1.0 se sama neaktualizuje; novou verzi stáhněte ručně a starou ukončete, jinak obě obsadí stejný port. Data se nepřenášejí, knihovny se přidají znovu.
+
+## Sestavení ze zdrojů
+
+Xcode 26+, macOS 26+. Projekt vychází ze šablony [minor-swift-starter](https://github.com/novami/minor-swift-starter); nastavení buildu je v `Config/*.xcconfig`.
 
 ```bash
-make install-app   # sestaví dist/MinorDLNA.app a zkopíruje do ~/Applications
-make test          # swift test
-make lint          # swiftlint --strict (brew install swiftlint)
+./scripts/build-ffmpeg.sh                    # LGPL ffmpeg a ffprobe do build/ffmpeg/out (první běh pár minut)
+xcodebuild test -scheme MinorDLNA -destination 'platform=macOS,arch=arm64'
+swiftlint lint --strict
 ```
 
-Data: `~/Library/Application Support/cz.minordlna.app` (nastavení, index), cache `~/Library/Caches/cz.minordlna.app`. Logy: `log stream --predicate 'subsystem == "cz.minordlna.app"'`. Webové rozhraní: `http://localhost:8200/`.
+Build aplikace spouští `scripts/build-ffmpeg.sh` sám (fáze *Build ffmpeg*); hotový výsledek se znovu nepoužije jen při změně skriptu nebo verze.
+
+Data: `~/Library/Application Support/cz.novami.minor.dlna` (nastavení, index), cache `~/Library/Caches/cz.novami.minor.dlna`. Logy: `log stream --predicate 'subsystem == "cz.novami.minor.dlna"'`. Webové rozhraní: `http://localhost:8200/`.
 
 ## Struktura
 
 ```text
-macos/Sources/MinorCore    jádro bez UI
-  Core/                      AppPaths, Settings, Status
-  Services/                  DLNA (SSDP, SOAP, MediaServer), Store (SQLite)
-  Features/                  Library, Media, Metadata, Transcode, Renderer (Přehrát na TV), Web, Update
-macos/Sources/MinorDLNA    SwiftUI aplikace
-  App/                       vstupní bod, AppModel
-  Features/                  Library, Overview, Settings, TV, Updates
-macos/Tests                testy jádra (swift-testing)
-packaging                  build .app, podpis, ikona, Info.plist
-.github/workflows          CI (lint, testy) a vydání
+App/           vstupní bod, AppModel, AppDelegate
+Core/          Settings, Status, AppPaths, AppLog
+  Server/        HTTP server (Network.framework), router, MediaServer, ffmpeg nástroje, PathGuard
+  SSDP/          SSDP announce a M-SEARCH
+  DLNA/          SOAP, DIDL-Lite, GENA, popisy zařízení, formáty
+  Store/         SQLite (systémová knihovna)
+Features/      Library, Media, Metadata, Transcode, Renderer (Přehrát na TV), Web, Overview, TV, Settings
+Config/        xcconfig: identita aplikace, verze, build
+scripts/       build-ffmpeg.sh
+Tests/         XCTest
 ```
 
-Závislosti (jen Swift balíčky, nic dalšího): Hummingbird, SwiftNIO, swift-service-lifecycle, swift-log, swift-http-types. Zbytek jsou systémové frameworky.
+Závislosti: jen [minor-swift-core](https://github.com/novami/minor-swift-core) (`MinorLog`, `MinorKeychain`, `MinorUpdater`) a ffmpeg jako přibalená binárka. Žádné jiné externí knihovny.
 
-## Automatické aktualizace
+## Síť a zabezpečení
 
-Vlastní updater nad GitHub Releases (ne Sparkle). V *Nastavení → Aplikace → Aktualizace*:
-
-- *Automaticky kontrolovat aktualizace* (výchozí zapnuto) – kontrola 60 s po startu a pak denně.
-- *Automaticky stahovat a instalovat* (výchozí zapnuto) – instaluje se jen mimo běžící převod; po vypnutí se nová verze jen nabídne a uživatel potvrdí *Stáhnout a nainstalovat*.
-- *Zkontrolovat* ručně, zobrazení aktuální a dostupné verze a stavu.
-
-Zabezpečení: HTTPS, `checksums.txt` podepsaný Ed25519 (veřejný klíč je v aplikaci), kontrola SHA-256 archivu, shoda bundle ID a ověření podpisu kódu (`codesign --verify`); při nespuštění nové verze se vrátí předchozí. Podepsáno vlastním certifikátem, bez notarizace – viz [SECURITY.md](SECURITY.md).
-
-## Vydání
-
-Tag `vX.Y.Z` spustí `.github/workflows/release.yml`: testy, build, zip, podepsaný `checksums.txt`, GitHub Release. Secrety: `MINORDLNA_SIGNING_KEY` (base64 32bajtového seedu Ed25519) a `MINORDLNA_CODESIGN_P12` (base64 certifikátu z `packaging/codesign-keygen.sh`; stejný certifikát udrží povolení Místní síť napříč aktualizacemi). Více v [CONTRIBUTING.md](CONTRIBUTING.md).
+Podrobnosti jsou v [SECURITY.md](SECURITY.md). Server přijímá jen klienty z privátních sítí, servíruje jen soubory z přidaných knihoven (cesty se rozeberou přes symlinky a porovnají s knihovnou) a webové rozhraní z jiných zařízení je ve výchozím stavu vypnuté, dokud nenastavíte PIN nebo heslo (uložené v Klíčence).
 
 ## Licence
 
-MIT
+Aplikace: MIT.
+
+**ffmpeg:** v aplikaci (`Contents/Helpers/ffmpeg`, `ffprobe`) je ffmpeg 9.0.2 sestavený jako **LGPL v2.1+** (`--disable-gpl --disable-nonfree`, bez libx264 a libx265; video se kóduje přes VideoToolbox). Zdrojové kódy přesné verze: <https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz> (SHA-256 `8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e`), postup sestavení: [scripts/build-ffmpeg.sh](scripts/build-ffmpeg.sh). Text licence je v aplikaci jako `Contents/Resources/FFMPEG-LICENSE.txt`. ffmpeg je spouštěný jako samostatný proces, aplikaci nelinkuje.
+
+## Vydání (správce)
+
+Tag `X.Y.Z` (bez „v“, shodný s `MARKETING_VERSION` v `Config/Version.xcconfig`) na `main` spustí `release.yml` z minor-swift-core: archiv, podpis Developer ID, notarizace, GitHub Release s `MinorDLNA-X.Y.Z.zip`. V repozitáři musí být nastavené secrety `DEVELOPER_ID_P12`, `DEVELOPER_ID_P12_PASSWORD`, `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_KEY_P8` a v `Config/App.xcconfig` `DEVELOPMENT_TEAM`. **Bez nich vydání selže.**

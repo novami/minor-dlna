@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>cs</string>
+	<key>CFBundleLocalizations</key>
+	<array><string>cs</string></array>
+	<key>LSUIElement</key>
+	<true/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>MinorDLNA potřebuje přístup k místní síti, aby ho televize našla a mohla přehrávat vaše média.</string>
+	<key>MinorUpdateRepository</key>
+	<string>$(UPDATE_REPOSITORY)</string>
+</dict>
+</plist>

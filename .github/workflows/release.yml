@@ -2,58 +2,29 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
-
-permissions:
-  contents: write
+    tags: ["[0-9]+.[0-9]+.[0-9]+"]
 
 concurrency:
   group: release
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
+  lint:
+    uses: novami/minor-swift-core/.github/workflows/lint.yml@0.1.2
+
+  test:
+    uses: novami/minor-swift-core/.github/workflows/app-test.yml@0.1.2
+    with:
+      scheme: MinorDLNA
+
   release:
-    runs-on: macos-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          persist-credentials: false
-      - id: swift
-        run: echo "version=$(swift --version 2>&1 | grep -o 'Swift version [0-9.]*' | tr ' ' '-')" >> "$GITHUB_OUTPUT"
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: macos/.build
-          key: build-${{ runner.os }}-${{ runner.arch }}-${{ steps.swift.outputs.version }}-${{ hashFiles('macos/Package.swift', 'macos/Package.resolved') }}-${{ github.sha }}
-          restore-keys: build-${{ runner.os }}-${{ runner.arch }}-${{ steps.swift.outputs.version }}-${{ hashFiles('macos/Package.swift', 'macos/Package.resolved') }}-
-      - run: swift test --package-path macos
-
-      - name: Build app
-        env:
-          VERSION: ${{ github.ref_name }}
-          MINORDLNA_CODESIGN_P12: ${{ secrets.MINORDLNA_CODESIGN_P12 }}
-        run: |
-          # Ad-hoc signed releases would lose the local network permission on every update.
-          test -n "$MINORDLNA_CODESIGN_P12" || { echo "secret MINORDLNA_CODESIGN_P12 missing"; exit 1; }
-          packaging/build-app.sh
-
-      - name: Package and sign
-        env:
-          VERSION: ${{ github.ref_name }}
-          MINORDLNA_SIGNING_KEY: ${{ secrets.MINORDLNA_SIGNING_KEY }}
-        run: |
-          cd dist
-          ditto -c -k --norsrc --noextattr --noacl --keepParent MinorDLNA.app "MinorDLNA-${VERSION}-macos.zip"
-          shasum -a 256 "MinorDLNA-${VERSION}-macos.zip" > checksums.txt
-          cd ..
-          swift packaging/sign-checksums.swift dist/checksums.txt
-
-      - name: Publish
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ github.ref_name }}
-        run: |
-          flags=""
-          case "$VERSION" in *-*) flags="--prerelease" ;; esac
-          gh release create "$VERSION" $flags --generate-notes --title "MinorDLNA $VERSION" \
-            "dist/MinorDLNA-${VERSION}-macos.zip" dist/checksums.txt dist/checksums.txt.sig
+    needs: [lint, test]
+    permissions:
+      contents: write
+    uses: novami/minor-swift-core/.github/workflows/app-release.yml@0.1.2
+    with:
+      scheme: MinorDLNA
+    secrets: inherit
