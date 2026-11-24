@@ -58,8 +58,12 @@ final class TranscodeTests: XCTestCase {
 		try FileManager.default.createDirectory(at: dir.appending(path: "Filmy"), withIntermediateDirectories: true)
 		defer { try? FileManager.default.removeItem(at: dir) }
 		// WMA audio in Matroska: LG plays the video but not the audio, so the video is copied and the audio converted.
-		_ = try await Prober.run(ffmpeg, ["-v", "error", "-f", "lavfi", "-i", "testsrc=d=6:s=320x240:r=25", "-f", "lavfi", "-i", "sine=d=6",
-		                                  "-c:v", "h264_videotoolbox", "-g", "25", "-c:a", "wmav2", dir.appending(path: "Filmy/Film (2020).mkv").path], timeout: 60)
+		do {
+			_ = try await Prober.run(ffmpeg, ["-v", "error", "-f", "lavfi", "-i", "testsrc=d=6:s=320x240:r=25", "-f", "lavfi", "-i", "sine=d=6",
+			                                  "-c:v", "h264_videotoolbox", "-g", "25", "-c:a", "wmav2", dir.appending(path: "Filmy/Film (2020).mkv").path], timeout: 60)
+		} catch {
+			throw XCTSkip("VideoToolbox cannot encode here (a virtual machine?): \(error)")
+		}
 		try Data([0x31, 0x0A, 0x30, 0x30, 0x3A, 0x30, 0x30, 0x3A, 0x30, 0x31, 0x2C, 0x30, 0x30, 0x30, 0x20, 0x2D, 0x2D, 0x3E, 0x20,
 		          0x30, 0x30, 0x3A, 0x30, 0x30, 0x3A, 0x30, 0x32, 0x2C, 0x30, 0x30, 0x30, 0x0A, 0x9A, 0x0A])
 			.write(to: dir.appending(path: "Filmy/Film (2020).srt")) // "š" in Windows-1250
